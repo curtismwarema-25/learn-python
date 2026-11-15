@@ -145,6 +145,61 @@ export default {
       username: '',
       password: ''
     }
+  },
+
+  methods: {
+    async signUp () {
+      try {
+        const response = await fetch('http://localhost:8000/auth/users/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(this.$data)
+        })
+
+        const result = await response.json()
+
+        if (!response.ok) {
+          throw new Error(JSON.stringify(result))
+        }
+
+        alert('Your account has been created. You will now be signed in.')
+        await this.signIn()
+      } catch (error) {
+        alert('Registration failed: ' + error.message)
+      }
+    },
+
+    async signIn () {
+      try {
+        const credentials = {
+          username: this.username,
+          password: this.password
+        }
+
+        const response = await fetch('http://localhost:8000/auth/token/login/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(credentials)
+        })
+
+        const result = await response.json()
+
+        if (!response.ok) {
+          throw new Error(JSON.stringify(result))
+        }
+
+        sessionStorage.setItem('authToken', result.auth_token)
+        sessionStorage.setItem('username', this.username)
+
+        this.$router.push('/')
+      } catch (error) {
+        alert('Sign in failed: ' + error.message)
+      }
+    }
   }
 }
 </script>
