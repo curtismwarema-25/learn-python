@@ -8,13 +8,14 @@
         <ul class="nav nav-tabs nav-justified" id="myTab" role="tablist">
           <li class="nav-item">
             <a
-              class="nav-link active"
+              class="nav-link"
+              :class="{ active: activeTab === 'signup' }"
               id="signup-tab"
-              data-toggle="tab"
               href="#signup"
               role="tab"
               aria-controls="signup"
-              aria-selected="true"
+              :aria-selected="activeTab === 'signup'"
+              @click.prevent="activeTab = 'signup'"
             >
               Sign Up
             </a>
@@ -22,12 +23,13 @@
           <li class="nav-item">
             <a
               class="nav-link"
+              :class="{ active: activeTab === 'signin' }"
               id="signin-tab"
-              data-toggle="tab"
               href="#signin"
               role="tab"
               aria-controls="signin"
-              aria-selected="false"
+              :aria-selected="activeTab === 'signin'"
+              @click.prevent="activeTab = 'signin'"
             >
               Sign In
             </a>
@@ -36,10 +38,12 @@
 
         <div class="tab-content" id="myTabContent">
           <div
-            class="tab-pane fade show active"
+            class="tab-pane"
+            :class="{ active: activeTab === 'signup' }"
             id="signup"
             role="tabpanel"
             aria-labelledby="signup-tab"
+            v-show="activeTab === 'signup'"
           >
             <form @submit.prevent="signUp">
               <div class="form-group">
@@ -98,10 +102,12 @@
           </div>
 
           <div
-            class="tab-pane fade"
+            class="tab-pane"
+            :class="{ active: activeTab === 'signin' }"
             id="signin"
             role="tabpanel"
             aria-labelledby="signin-tab"
+            v-show="activeTab === 'signin'"
           >
             <form @submit.prevent="signIn">
               <div class="form-group">
@@ -138,9 +144,12 @@
 </template>
 
 <script>
+import API_BASE_URL from '@/api'
+
 export default {
   data () {
     return {
+      activeTab: 'signup',
       email: '',
       username: '',
       password: ''
@@ -150,12 +159,16 @@ export default {
   methods: {
     async signUp () {
       try {
-        const response = await fetch('http://localhost:8000/auth/users/', {
+        const response = await fetch(`${API_BASE_URL}/auth/users/`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify(this.$data)
+          body: JSON.stringify({
+            email: this.email,
+            username: this.username,
+            password: this.password
+          })
         })
 
         const result = await response.json()
@@ -178,7 +191,7 @@ export default {
           password: this.password
         }
 
-        const response = await fetch('http://localhost:8000/auth/token/login/', {
+        const response = await fetch(`${API_BASE_URL}/auth/token/login/`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -192,10 +205,19 @@ export default {
           throw new Error(JSON.stringify(result))
         }
 
-        sessionStorage.setItem('authToken', result.auth_token)
-        sessionStorage.setItem('username', this.username)
+        window.sessionStorage.setItem('authToken', result.auth_token)
+        window.sessionStorage.setItem('username', this.username)
 
-        this.$router.push('/')
+        const redirect = this.$route && this.$route.query
+          ? this.$route.query.redirect
+          : null
+        this.$router.push(
+          typeof redirect === 'string' &&
+            redirect.startsWith('/') &&
+            redirect !== '/auth'
+            ? redirect
+            : '/'
+        )
       } catch (error) {
         alert('Sign in failed: ' + error.message)
       }

@@ -15,6 +15,11 @@ const router = new Router({
       component: Chat
     },
     {
+      path: '/chats/:uri',
+      name: 'ChatSession',
+      component: Chat
+    },
+    {
       path: '/auth',
       name: 'UserAuth',
       component: UserAuth
@@ -23,13 +28,17 @@ const router = new Router({
 })
 
 router.beforeEach((to, from, next) => {
-  const authToken = sessionStorage.getItem('authToken')
+  const authToken = window.sessionStorage.getItem('authToken')
 
-  if (authToken !== null || to.path === '/auth') {
-    next()
-  } else {
-    next('/auth')
+  if (!authToken && to.path !== '/auth') {
+    next({
+      path: '/auth',
+      query: { redirect: to.fullPath }
+    })
+    return
   }
+
+  next()
 })
 
 export default router
