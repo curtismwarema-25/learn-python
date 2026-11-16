@@ -8,7 +8,7 @@ practical features, learn from the rough edges, and improve the code as my
 understanding grows. It is an evolving learning project rather than a finished
 product.
 
-The long-term goal is to use Chatire as a place to explore the many ways Python
+The long-term goal is to use Fuego as a place to explore the many ways Python
 can be used, growing the app as I learn. Possible areas include algorithms,
 data processing and sorting, machine learning, and other practical Python use
 cases. The exact direction is still open; I'll discover and shape it through
@@ -16,7 +16,7 @@ the work.
 
 ## What I'm working on
 
-The main application is **Chatire**, a full-stack chat app and the foundation
+The main application is **Fuego**, a full-stack chat app and the foundation
 for this exploration. Its current features give me a place to practice
 backend concepts in context:
 
@@ -36,11 +36,28 @@ backend concepts in context:
 - Explore asynchronous and real-time patterns without losing sight of a
   straightforward local development setup
 
-## Run Chatire
+## Run Fuego locally
 
-The application-specific setup, including Windows commands and notes about
-the frontend and optional RabbitMQ bridge, is in the
-[Chatire setup guide](./chatire/chatire-frontend/README.md).
+Do the setup once from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r .\fuego\requirements.txt
+.\.venv\Scripts\python.exe .\fuego\manage.py migrate
+npm --prefix .\fuego\fuego-frontend install
+```
+
+Then start Django and the React frontend together with one command:
+
+```powershell
+npm --prefix .\fuego\fuego-frontend run dev:all
+```
+
+Open `http://localhost:5173` for the app. The frontend connects to Django on
+port 8000. Press `Ctrl+C` in the terminal to stop both servers.
+
+More setup details, build commands, and notes about the optional RabbitMQ
+bridge are in the
+[Fuego setup guide](./fuego/fuego-frontend/README.md).
 
 ## Project status
 
