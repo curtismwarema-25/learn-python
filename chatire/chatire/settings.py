@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -31,6 +32,7 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -41,9 +43,26 @@ INSTALLED_APPS = [
     #customapps
     'rest_framework',
     'rest_framework.authtoken',
+    'channels',
     'corsheaders',
     'djoser',
+    'chat',
+    'notifications',
 ]
+
+ASGI_APPLICATION = 'chatire.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
+
+CELERY_TASK_ALWAYS_EAGER = True
+CHAT_RABBITMQ_ENABLED = os.environ.get(
+    'CHAT_RABBITMQ_ENABLED', ''
+).lower() in {'1', 'true', 'yes'}
+CHAT_RABBITMQ_HOST = os.environ.get('CHAT_RABBITMQ_HOST', 'localhost')
 
 CORS_ORIGIN_ALLOW_ALL = True
 
@@ -136,7 +155,11 @@ MAILERS = {
 }
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
     ],
 }
