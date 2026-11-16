@@ -4,6 +4,13 @@ The frontend is a React and TypeScript single-page app built with Vite. It
 uses React Router for `/auth`, `/`, and `/chats/<uri>` routes and keeps the
 existing Django REST API and Channels WebSocket integration.
 
+Fuego is currently a chat app and the foundation for a broader,
+conversation-first technology and learning platform. The long-term goal is to
+connect community, useful knowledge, category-based learning, and practical
+creation. Python is an important learning area, not the platform's limit; AI
+applied to real-world workflows is another potential area. See the
+[project README](../../README.md) for the full direction.
+
 ## Frontend structure
 
 - `src/App.tsx` defines routes and the signed-in route guard.

@@ -2,22 +2,34 @@
 
 ## Why this repository exists
 
-This is my learn-as-I-go workspace for refreshing my Python skills and getting
-stronger at backend development, especially with Django. I use it to build
-practical features, learn from the rough edges, and improve the code as my
+This is my learn-as-I-go workspace for refreshing my Python skills and
+developing as a software builder. I use it to learn through practical work,
+including backend development with Django, and to improve the project as my
 understanding grows. It is an evolving learning project rather than a finished
 product.
 
-The long-term goal is to use Fuego as a place to explore the many ways Python
-can be used, growing the app as I learn. Possible areas include algorithms,
-data processing and sorting, machine learning, and other practical Python use
-cases. The exact direction is still open; I'll discover and shape it through
-the work.
+The long-term vision for **Fuego** is a conversation-first technology and
+learning platform. It starts as a chat app and can grow to connect community,
+useful knowledge, guided learning, and practical creation:
+
+**Conversation → Community → Knowledge → Learning → Creation**
+
+Fuego should organize learning into focused hubs by category, keeping
+discussion, useful resources, guided learning, and hands-on work connected.
+Python is an important foundation and learning area, but it does not define the
+platform's limits. Other areas may include emerging technology and using AI
+effectively in everyday work.
+
+For practical AI learning, the focus is on improving real workflows: understand
+the work, identify where AI may help, apply it, evaluate the results, and
+improve the process. The exact categories and features will evolve through
+learning and validation; the goal is a coherent platform, not a collection of
+unrelated demos.
 
 ## What I'm working on
 
-The main application is **Fuego**, a full-stack chat app and the foundation
-for this exploration. Its current features give me a place to practice
+**Fuego is currently a full-stack chat app**, which provides the foundation
+for this broader platform. Its current features give me a place to practice
 backend concepts in context:
 
 - Django models, migrations, and application structure
@@ -35,6 +47,8 @@ backend concepts in context:
 - Test backend behavior and the flows that connect its components
 - Explore asynchronous and real-time patterns without losing sight of a
   straightforward local development setup
+- Learn to connect conversations, knowledge, and practical learning in focused
+  category hubs
 
 ## Run Fuego locally
 
