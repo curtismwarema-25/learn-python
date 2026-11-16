@@ -1,0 +1,43 @@
+# Learn Python
+
+## Why this repository exists
+
+This is my learn-as-I-go workspace for refreshing my Python skills and getting
+stronger at backend development, especially with Django. I use it to build
+practical features, learn from the rough edges, and improve the code as my
+understanding grows. It is an evolving learning project rather than a finished
+product.
+
+## What I'm working on
+
+The main application is **Chatire**, a small full-stack chat app that gives me
+a place to practice backend concepts in context:
+
+- Django models, migrations, and application structure
+- REST APIs and token-based authentication with Django REST Framework
+- Chat ownership, membership, and access control
+- Real-time messaging with Django Channels and WebSockets
+- An optional RabbitMQ/uWSGI bridge that I am exploring alongside the local
+  Channels setup
+- Connecting a Vue frontend to the Django backend
+
+## What I want to learn
+
+- Design and build reliable Django APIs
+- Understand how authentication and permissions shape an application
+- Test backend behavior and the flows that connect its components
+- Explore asynchronous and real-time patterns without losing sight of a
+  straightforward local development setup
+
+## Run Chatire
+
+The application-specific setup, including Windows commands and notes about
+the frontend and optional RabbitMQ bridge, is in the
+[Chatire setup guide](./chatire/chatire-frontend/README.md).
+
+## Project status
+
+Features and structure may change as I learn. The local real-time setup uses
+Channels' in-memory layer and is intended for a single server process.
+RabbitMQ/uWSGI requires separate services and deployment configuration; it is
+an optional experiment, not part of the default Windows setup.
