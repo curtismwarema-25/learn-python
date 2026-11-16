@@ -8,10 +8,17 @@ practical features, learn from the rough edges, and improve the code as my
 understanding grows. It is an evolving learning project rather than a finished
 product.
 
+The long-term goal is to use Chatire as a place to explore the many ways Python
+can be used, growing the app as I learn. Possible areas include algorithms,
+data processing and sorting, machine learning, and other practical Python use
+cases. The exact direction is still open; I'll discover and shape it through
+the work.
+
 ## What I'm working on
 
-The main application is **Chatire**, a small full-stack chat app that gives me
-a place to practice backend concepts in context:
+The main application is **Chatire**, a full-stack chat app and the foundation
+for this exploration. Its current features give me a place to practice
+backend concepts in context:
 
 - Django models, migrations, and application structure
 - REST APIs and token-based authentication with Django REST Framework
@@ -19,7 +26,7 @@ a place to practice backend concepts in context:
 - Real-time messaging with Django Channels and WebSockets
 - An optional RabbitMQ/uWSGI bridge that I am exploring alongside the local
   Channels setup
-- Connecting a Vue frontend to the Django backend
+- Connecting a React + TypeScript frontend to the Django backend
 
 ## What I want to learn
 

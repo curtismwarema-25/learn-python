@@ -1,0 +1,118 @@
+#app {
+  color: #2c3e50;
+  font-family: Avenir, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin-top: 60px;
+}
+
+#auth-container {
+  margin-top: 50px;
+}
+
+.auth-content {
+  padding-top: 20px;
+}
+
+.nav-tabs .nav-link {
+  cursor: pointer;
+}
+
+.chat-welcome {
+  margin: 0 auto;
+  max-width: 620px;
+}
+
+.chat-welcome p {
+  margin: 28px 0;
+}
+
+.card-footer input.message-input {
+  background-color: #fff;
+  border: 2px solid #ccc;
+  color: #444;
+  font-size: 13px;
+  height: 38px;
+  padding: 7px;
+  width: 100%;
+}
+
+.card-body {
+  background-color: #ddd;
+}
+
+.chat-body {
+  height: 380px;
+  margin-bottom: -5px;
+  margin-top: -15px;
+  overflow-y: auto;
+}
+
+.speech-bubble {
+  background-color: #fff;
+  border-radius: 0.4em;
+  display: inline-block;
+  font-size: 14px;
+  padding: 10px;
+  position: relative;
+}
+
+.subtle-blue-gradient {
+  background: linear-gradient(45deg, #004bff, #007bff);
+}
+
+.speech-bubble-user::after {
+  border: 20px solid transparent;
+  border-left-color: #007bff;
+  border-right: 0;
+  border-top: 0;
+  content: "";
+  height: 0;
+  margin-right: -20px;
+  margin-top: -10px;
+  position: absolute;
+  right: 4px;
+  top: 10px;
+  width: 0;
+}
+
+.speech-bubble-peer::after {
+  border: 20px solid transparent;
+  border-left: 0;
+  border-right-color: #fff;
+  border-top: 0;
+  content: "";
+  height: 0;
+  left: 3px;
+  margin-left: -20px;
+  margin-top: -10px;
+  position: absolute;
+  top: 10px;
+  width: 0;
+}
+
+.chat-section {
+  margin-top: 15px;
+}
+
+.chat-section:first-child {
+  margin-top: 10px;
+}
+
+.avatar {
+  align-items: center;
+  border-radius: 50%;
+  color: #fff;
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.avatar-user {
+  background-color: #333;
+}
+
+.avatar-peer {
+  background-color: #f16000;
+}
