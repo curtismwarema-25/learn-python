@@ -14,11 +14,15 @@ applied to real-world workflows is another potential area. See the
 ## Frontend structure
 
 - `src/App.tsx` defines routes and the signed-in route guard.
+- `src/components/AppShell.tsx` provides the signed-in application shell.
 - `src/components/UserAuth.tsx` handles account creation and sign-in.
 - `src/components/Chat.tsx` handles chat sessions, message history, and
-  WebSocket updates.
+  WebSocket updates; `ChatMessage.tsx` and `MessageComposer.tsx` provide the
+  conversation's reusable message and input components.
 - `src/api.ts` contains the API request helper and validates API response
   shapes before the components use them.
+- `src/styles.css` defines the shared visual tokens, responsive layout, and
+  component styles.
 - `tsconfig.json` enables strict type checking. The production build runs
   TypeScript checking before Vite bundles the app.
 

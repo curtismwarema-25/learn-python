@@ -3,6 +3,7 @@ from unittest.mock import patch
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 
 from rest_framework.test import APIClient
@@ -42,6 +43,21 @@ class ChatAccessControlTests(TestCase):
             f'/api/chats/{self.chat.uri}/messages/'
         )
         self.chat_url = f'/api/chats/{self.chat.uri}/'
+
+    def test_chat_invite_uri_is_unique_in_the_database(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ChatSession.objects.create(
+                    owner=self.owner,
+                    uri=self.chat.uri
+                )
+
+    def test_chat_membership_is_unique_in_the_database(self):
+        self.chat.members.create(user=self.other_user)
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self.chat.members.create(user=self.other_user)
 
     def test_owner_can_read_messages(self):
         self.client.force_authenticate(user=self.owner)

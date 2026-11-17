@@ -4,7 +4,7 @@
 |---|---|
 | Status | Verified repository snapshot; not a production-readiness assessment |
 | Reviewed | 2026-11-17 |
-| Repository reference | Branch `main`, commit `49e4058` |
+| Repository reference | Branch `main`, commit `a55a4f8`; workspace also contains uncommitted changes |
 | Scope | Django backend, React frontend, configuration, tests, and tracked project files |
 
 This document records what was verified in the repository and local development
@@ -24,6 +24,9 @@ the [Fuego master](./FUEGO_MASTER.md): there are no implemented community
 spaces, reusable knowledge system, learning pathways, or AI workflow features.
 The `notes` directory is only a placeholder.
 
+The capability-by-capability comparison and selected backend milestone are in
+the [Fuego backend implementation audit](./BACKEND_IMPLEMENTATION_AUDIT.md).
+
 The default configuration is for local development. Production hosting,
 security configuration, multi-process real-time delivery, data backup and
 recovery, and operational support have not been demonstrated. Do not treat
@@ -41,12 +44,15 @@ this repository as production-ready on the basis of these tests.
 
 ### Snapshot reference
 
-- Application source was inspected at `main` / `49e4058`.
-- The working tree was not clean: `README.md` and
-  `fuego/fuego-frontend/README.md` were modified, and `docs/` was untracked at
-  the start of this review. This baseline describes the local checkout and is
-  not a claim that those documentation changes are committed.
-- The review did not inspect the contents of the tracked SQLite database.
+- Application source was inspected at `main` / `a55a4f8` and the modified
+  local workspace. Findings include uncommitted changes and are not a claim
+  about the commit alone.
+- The working tree was not clean at review time. This baseline describes the
+  local checkout and does not imply that its source or documentation changes
+  are committed.
+- Database row contents were not inspected. An aggregate-only check found
+  four chat sessions, no membership rows, and no duplicate chat URIs or
+  memberships.
 - This was a repository and local-test review, not a penetration test,
   dependency vulnerability assessment, load test, or production deployment
   review.
@@ -154,14 +160,16 @@ The project uses Django's built-in user model. The checked-in initial chat
 migration creates these three models. No learning, community, or knowledge
 models were found in the active app configuration.
 
-**Review needed:** the checked-in model and migration do not declare a
-database uniqueness constraint for chat URIs or for `(chat_session, user)`
-membership pairs. Application code uses `get_or_create` for memberships, but
-the database does not enforce uniqueness under concurrent requests.
+The model and migration `0002_alter_chatsession_uri_and_more.py` enforce
+database uniqueness for chat URIs and `(chat_session, user)` membership pairs.
+This migration was not applied to the tracked local database during the audit;
+apply it before using the constraints in that database. The aggregate check
+found no conflicting rows in the current local database.
 
 Relevant implementation:
 [`fuego/chat/models.py`](../fuego/chat/models.py),
-[`fuego/chat/migrations/0001_initial.py`](../fuego/chat/migrations/0001_initial.py).
+[`fuego/chat/migrations/0001_initial.py`](../fuego/chat/migrations/0001_initial.py),
+[`fuego/chat/migrations/0002_alter_chatsession_uri_and_more.py`](../fuego/chat/migrations/0002_alter_chatsession_uri_and_more.py).
 
 ### Frontend
 
@@ -173,7 +181,8 @@ validates several response shapes before components use them.
 The frontend assumes the Django server is available on port `8000`; that
 address is constructed in
 [`fuego/fuego-frontend/src/api.ts`](../fuego/fuego-frontend/src/api.ts).
-Reconnect behavior for dropped WebSockets is not implemented.
+Dropped WebSockets now use bounded automatic retries, a manual retry after
+exhaustion, and message-history synchronization after reconnection.
 
 ### Not implemented
 
@@ -225,9 +234,9 @@ Commands were run on **2026-11-17** in the local environment.
 |---|---|
 | `python manage.py check` | **Passed:** no system-check issues. |
 | `python manage.py makemigrations --check --dry-run` | **Passed:** no model changes detected that require a migration. |
-| `python manage.py test chat` | **Passed:** 14 backend tests. |
+| `python manage.py test chat` | **Passed:** 16 backend tests. |
 | Frontend `npm run typecheck` | **Passed.** |
-| Frontend `npm test` | **Passed:** 2 tests in 1 test file. |
+| Frontend `npm test` | **Passed:** 5 tests in 2 test files. |
 | Frontend `npm run build` | **Passed:** TypeScript check and Vite production build. |
 
 Run backend checks from the repository root with an explicit app label:
@@ -253,10 +262,10 @@ Pop-Location
 ```
 
 Backend tests cover registration/token login, ownership and membership
-permissions, invite joining, message access, and WebSocket access/delivery. The
-RabbitMQ publisher test mocks the connection; it does not validate a live
-RabbitMQ/uWSGI deployment. Frontend tests cover two authentication scenarios;
-there are no frontend chat-component tests in the current test suite.
+permissions, invite joining, message access, database uniqueness, and
+WebSocket access/delivery. The RabbitMQ publisher test mocks the connection;
+it does not validate a live RabbitMQ/uWSGI deployment. Frontend tests cover
+authentication and chat/reconnect scenarios.
 
 These automated checks do not establish that the full stack has been manually
 walked through in a browser, that real-time delivery works across multiple
@@ -271,10 +280,10 @@ These are source-level findings for follow-up, not a formal security audit.
 | Blocker for public deployment | Development settings enable `DEBUG`, use a hard-coded development-marked key, leave `ALLOWED_HOSTS` empty, and allow all CORS origins. | **Verified.** Introduce and validate a separate production configuration before deployment; do not expose the development key. |
 | High | The WebSocket token is supplied in the query string. | **Verified.** Review proxy, application, and analytics logging; choose and document a safer production transport. |
 | High | The default in-memory channel layer is process-local. | **Verified.** Multi-worker or multi-instance message delivery is not established; select and test a shared channel layer before scaling. |
-| High | SQLite is the configured database and the database file is tracked. | **Verified.** The database contents were not inspected. Decide how user data is protected, backed up, restored, and kept out of source control. |
+| High | SQLite is the configured database and the database file is tracked. | **Verified.** Row contents were not inspected; only aggregate counts and duplicate checks were run. Decide how user data is protected, backed up, restored, and kept out of source control. |
 | Medium | CORS allows all origins; DRF also enables Basic and Session authentication. | **Verified.** Reassess allowed origins and authentication methods for the intended deployment and transport. |
 | Medium | No DRF throttling configuration was found. | **Verified in settings.** Define abuse/rate controls appropriate to public registration, login, and message endpoints. |
-| Medium | Chat history has no pagination, and membership/URI uniqueness is not database-enforced. | **Verified in current source/migration.** Review expected data volume and concurrent membership behavior before expanding use. |
+| Medium | Chat history has no pagination; migration `0002` adds database uniqueness for URIs and memberships. | **Verified in source.** The migration is pending on the tracked local database; apply it before using this database with the updated model. Review history volume before expansion. |
 | Medium | The RabbitMQ/uWSGI bridge depends on separately provisioned services and is outside the standard local setup. | **Verified in source and setup docs; not live-tested.** Treat as experimental until deployment and failure behavior are exercised. |
 | Low | Tracked files include Python bytecode caches and pre-access-control source snapshots. | **Verified in the tracked-file inventory.** Decide on repository hygiene separately; ensure snapshot files are not mistaken for active code. |
 
@@ -296,8 +305,13 @@ Before calling Phase 0 complete:
 2. Demonstrate that a non-member cannot read messages, send messages, or open
    the WebSocket, and that only the owner can add members.
 3. Decide whether joining by possession of a URI is the intended invite policy.
-4. Record a product audience and initial user problem; the repository alone
-   cannot establish user need.
+4. The founder has selected non-technical aspiring technology learners who
+   are new to hands-on AI and want to learn by making. The founder's current
+   learning hypothesis is to explain simply how data is used to build or adapt
+   a model and how a trained model turns input into output, then help learners
+   narrow a broad problem into a practical use and tangible project. Validate
+   the first problem, sequence, and outcome through conversations; this
+   repository review does not establish user need.
 5. Decide how database and generated artifacts should be handled in version
    control, without deleting or exposing existing user data.
 6. Track the production-security and operational unknowns above before any

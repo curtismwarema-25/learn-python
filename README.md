@@ -20,11 +20,12 @@ Python is an important foundation and learning area, but it does not define the
 platform's limits. Other areas may include emerging technology and using AI
 effectively in everyday work.
 
-For practical AI learning, the focus is on improving real workflows: understand
-the work, identify where AI may help, apply it, evaluate the results, and
-improve the process. The exact categories and features will evolve through
-learning and validation; the goal is a coherent platform, not a collection of
-unrelated demos.
+Fuego's initial audience is non-technical people who want to get into
+technology but are unsure where to start. They are curious about AI's
+potential, want to experience it hands-on, learn as they go, and make
+something of their own. Practical AI in existing work workflows remains part
+of the broader vision, but the first learning path and project still need
+validation.
 
 ## What I'm working on
 

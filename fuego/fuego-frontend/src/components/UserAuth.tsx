@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiRequest, getErrorMessage, parseAuthToken } from '../api'
 
 function getSafeRedirect (state: unknown): string {
@@ -62,116 +62,118 @@ export default function UserAuth () {
   }
 
   return (
-    <section className="container">
-      <h1 className="text-center">Welcome to Fuego!</h1>
+    <main className="auth-screen">
+      <section className="auth-panel" aria-labelledby="auth-heading">
+        <Link className="brand-lockup auth-brand" to="/" aria-label="Fuego home">
+          <span className="brand-mark" aria-hidden="true">F</span>
+          <span className="brand-name">fuego<span>.</span></span>
+        </Link>
 
-      <div id="auth-container" className="row">
-        <div className="col-sm-4 offset-sm-4">
-          <ul className="nav nav-tabs nav-justified" role="tablist">
-            <li className="nav-item">
-              <button
-                className={`nav-link ${activeTab === 'signup' ? 'active' : ''}`}
-                id="signup-tab"
-                type="button"
-                role="tab"
-                aria-controls="signup"
-                aria-selected={activeTab === 'signup'}
-                onClick={() => {
-                  setErrorMessage('')
-                  setActiveTab('signup')
-                }}
-              >
-                Sign Up
-              </button>
-            </li>
-            <li className="nav-item">
-              <button
-                className={`nav-link ${activeTab === 'signin' ? 'active' : ''}`}
-                id="signin-tab"
-                type="button"
-                role="tab"
-                aria-controls="signin"
-                aria-selected={activeTab === 'signin'}
-                onClick={() => {
-                  setErrorMessage('')
-                  setActiveTab('signin')
-                }}
-              >
-                Sign In
-              </button>
-            </li>
-          </ul>
+        <p className="eyebrow"><span>F / ACCOUNT</span> A PLACE TO BEGIN</p>
+        <h1 className="auth-heading" id="auth-heading">Join the conversation.</h1>
+        <p className="auth-description">Sign in or create an account to get started.</p>
 
-          {errorMessage && (
-            <p className="alert alert-danger" role="alert">{errorMessage}</p>
-          )}
-
-          <div
-            className="tab-content auth-content"
-            id={activeTab}
-            role="tabpanel"
-            aria-labelledby={`${activeTab}-tab`}
+        <div className="auth-tabs" role="tablist" aria-label="Account access">
+          <button
+            className={`auth-tab ${activeTab === 'signup' ? 'is-active' : ''}`}
+            id="signup-tab"
+            type="button"
+            role="tab"
+            aria-controls="signup-panel"
+            aria-selected={activeTab === 'signup'}
+            onClick={() => {
+              setErrorMessage('')
+              setActiveTab('signup')
+            }}
           >
-            <form onSubmit={handleSubmit}>
-              {activeTab === 'signup' && (
-                <div className="mb-3">
-                  <input
-                    className="form-control"
-                    id="signup-email"
-                    type="email"
-                    placeholder="Email Address"
-                    autoComplete="email"
-                    value={email}
-                    onChange={event => setEmail(event.target.value)}
-                    required
-                  />
-                </div>
-              )}
-
-              <div className="mb-3">
-                <input
-                  className="form-control"
-                  id={`${activeTab}-username`}
-                  type="text"
-                  placeholder="Username"
-                  autoComplete="username"
-                  value={username}
-                  onChange={event => setUsername(event.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="mb-3">
-                <input
-                  className="form-control"
-                  id={`${activeTab}-password`}
-                  type="password"
-                  placeholder="Password"
-                  autoComplete={activeTab === 'signup' ? 'new-password' : 'current-password'}
-                  value={password}
-                  onChange={event => setPassword(event.target.value)}
-                  required
-                />
-              </div>
-
-              {activeTab === 'signup' && (
-                <div className="form-check mb-3">
-                  <input className="form-check-input" type="checkbox" id="toc" required />
-                  <label className="form-check-label" htmlFor="toc">
-                    Accept terms and Conditions
-                  </label>
-                </div>
-              )}
-
-              <button className="btn btn-primary w-100" type="submit" disabled={submitting}>
-                {submitting
-                  ? 'Please wait...'
-                  : activeTab === 'signup' ? 'Sign up' : 'Sign in'}
-              </button>
-            </form>
-          </div>
+            Sign Up
+          </button>
+          <button
+            className={`auth-tab ${activeTab === 'signin' ? 'is-active' : ''}`}
+            id="signin-tab"
+            type="button"
+            role="tab"
+            aria-controls="signin-panel"
+            aria-selected={activeTab === 'signin'}
+            onClick={() => {
+              setErrorMessage('')
+              setActiveTab('signin')
+            }}
+          >
+            Sign In
+          </button>
         </div>
-      </div>
-    </section>
+
+        {errorMessage && (
+          <p className="notice notice-error auth-error" role="alert">{errorMessage}</p>
+        )}
+
+        <div
+          className="auth-content"
+          id={`${activeTab}-panel`}
+          role="tabpanel"
+          aria-labelledby={`${activeTab}-tab`}
+        >
+          <form className="auth-form" onSubmit={handleSubmit}>
+            {activeTab === 'signup' && (
+              <div>
+                <label className="visually-hidden" htmlFor="signup-email">Email address</label>
+                <input
+                  className="auth-input"
+                  id="signup-email"
+                  type="email"
+                  placeholder="Email Address"
+                  autoComplete="email"
+                  value={email}
+                  onChange={event => setEmail(event.target.value)}
+                  required
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="visually-hidden" htmlFor={`${activeTab}-username`}>Username</label>
+              <input
+                className="auth-input"
+                id={`${activeTab}-username`}
+                type="text"
+                placeholder="Username"
+                autoComplete="username"
+                value={username}
+                onChange={event => setUsername(event.target.value)}
+                required
+              />
+            </div>
+
+            <div>
+              <label className="visually-hidden" htmlFor={`${activeTab}-password`}>Password</label>
+              <input
+                className="auth-input"
+                id={`${activeTab}-password`}
+                type="password"
+                placeholder="Password"
+                autoComplete={activeTab === 'signup' ? 'new-password' : 'current-password'}
+                value={password}
+                onChange={event => setPassword(event.target.value)}
+                required
+              />
+            </div>
+
+            {activeTab === 'signup' && (
+              <label className="terms-check" htmlFor="toc">
+                <input type="checkbox" id="toc" required />
+                <span>Accept terms and Conditions</span>
+              </label>
+            )}
+
+            <button className="button button-primary auth-submit" type="submit" disabled={submitting}>
+              {submitting
+                ? 'Please wait…'
+                : activeTab === 'signup' ? 'Sign up' : 'Sign in'}
+            </button>
+          </form>
+        </div>
+      </section>
+    </main>
   )
 }

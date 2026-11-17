@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Status | Consolidated strategic draft; detailed capabilities remain proposals |
-| Version | 0.3 |
+| Version | 0.5 |
 | Updated | 17 November 2026 |
 | Product | Fuego |
 | Purpose | Single reference for product direction, learning strategy, roadmap, and development guardrails |
@@ -32,9 +32,14 @@ Fuego has three connected dimensions:
 - **Knowledge:** explanations, resources, discussions, and technical learning.
 - **Work:** practical workflows, projects, and real-world outcomes.
 
+Fuego's initial audience is non-technical people eager to enter technology
+but unsure where to begin. They are interested in AI's potential but have not
+experienced it hands-on; they want to learn along the way and finish by making
+something of their own.
+
 AI should connect these dimensions, not define the entire identity of Fuego.
-One important learning strategy is helping people apply AI to work they
-already do. The starting question is:
+One important broader learning strategy is helping people apply AI to work
+they already do. The starting question is:
 
 > What are people doing today, what are they trying to achieve, and where can
 > AI meaningfully help?
@@ -95,9 +100,10 @@ practice, and everyday life. Exposure alone does not ensure understanding or
 the ability to apply it. Fuego aims to address connected gaps:
 
 - **Awareness:** unfamiliar terms and claims make technology difficult to
-  understand.
-- **Starting point:** people may not know what to learn first or which tools
-  matter for their goal.
+  understand; people may hear that AI is powerful without having a first-hand
+  experience of using it.
+- **Starting point:** aspiring technology learners may not know where to begin,
+  what to learn first, or which tools matter for their goal.
 - **Application:** knowing about a tool is different from improving a real
   task or workflow with it.
 - **Technical access:** people may want to build but lack programming, data,
@@ -105,7 +111,8 @@ the ability to apply it. Fuego aims to address connected gaps:
 - **Confidence:** technology can seem inaccessible to beginners or people
   without powerful devices and paid tools.
 - **Opportunity:** learners need practice, collaboration, and ways to
-  demonstrate capability, not information alone.
+  demonstrate capability by making something, not consuming information
+  alone.
 - **Knowledge retention:** useful explanations and solutions can disappear
   inside chat histories and fragmented discussions.
 
@@ -232,9 +239,10 @@ and independent work at an appropriate depth.
 
 ### Proposed pathways
 
-- **AI Awareness:** understand basic concepts, common applications,
-  limitations, and responsible use. Outcome: identify where AI may or may
-  not help.
+- **AI Awareness:** understand basic concepts, common applications, the
+  high-level flow from data and inputs to outputs, limitations, and
+  responsible use. Outcome: explain a simple AI flow in everyday language and
+  identify where AI may or may not help.
 - **AI Fluency:** use AI in meaningful tasks, verify results, and evaluate
   quality. Outcome: complete and assess practical work with AI assistance.
 - **AI Building:** learn programming, Python, APIs, data handling, model
@@ -286,6 +294,28 @@ The learning cycle is:
 Every significant experience should explain what the learner will understand,
 why it matters, where it can be used, what they can practise, how they can
 check understanding, and how to share or build on the result.
+
+### Founder hypothesis: first AI learning journey
+
+The initial learning experience may help a beginner move through this sequence:
+
+1. Start with a problem described in everyday language.
+2. Broaden it into a general idea or pattern before choosing a tool.
+3. Show two related but distinct visual flows:
+   - building or adapting a system: select and prepare data, train or adjust a
+     model, then evaluate it;
+   - using a trained system: provide input and context, receive an output, and
+     review it before deciding what to do next.
+4. Narrow the broader idea to one specific task or context, map its current
+   steps, and identify where AI could help or where it should not be used.
+5. Improve and test that workflow, then make something tangible that shows
+   what the learner understood.
+
+Keep the explanation non-technical and grounded in examples, without implying
+that every AI system works the same way. The two flows are connected but are
+not one continuous operation: a normal prompt does not necessarily retrain the
+model. The exact first problem, pathway, and project remain open; this is a
+founder hypothesis to validate with learners.
 
 ## 9. AI literacy and responsible use
 
@@ -691,11 +721,12 @@ next.
 - **Capabilities:** learning hubs, pathways, units, lessons, objectives,
   activities, simple knowledge checks, progress, and related discussions.
   AI Foundations and Python Foundations are candidates, not fixed launch
-  requirements.
+  requirements. Favor learning-by-doing with a tangible outcome; the first
+  pathway and project still need validation.
 - **Dependencies:** Phases 2 and 3.
 - **Outcome/acceptance:** a beginner can choose a pathway, complete an
   activity, see meaningful progress, find relevant discussion, and
-  demonstrate what was learned.
+  demonstrate what was learned through something they make.
 - **Out of scope:** a large course catalogue, complex grading, and
   credentials.
 
@@ -704,6 +735,9 @@ next.
 - **Problem:** people hear about AI but may not know how to apply it to real
   work.
 - **Objective:** validate workflow-first learning in one or a few domains.
+- **Audience note:** the initial audience may not have a professional
+  workflow to improve. Validate beginner-friendly, hands-on AI experiences
+  and buildable challenges before selecting the first work domain.
 - **Capabilities:** workflow lessons, examples, exercises, community
   playbooks, verification, outcome baselines, and practical challenges.
 - **Dependencies:** Phases 3 and 4; evidence from people who do the work.
@@ -749,12 +783,20 @@ next.
 - Connect people, knowledge, learning, and practical work progressively.
 - Treat AI in real workflows as a major strategic pillar, not the whole
   product identity.
-- Support beginners, non-technical practitioners, and technical learners.
+- Prioritize non-technical people who want to enter technology but lack a
+  starting point, including people curious about AI who have not tried it
+  hands-on. Do not assume prior technical or AI experience.
+- Let learners understand as they practice and create a tangible outcome.
+- Keep other learners and practitioners in scope for the broader platform;
+  they are not the initial audience.
 - Validate needs before expanding architecture or content scope.
 
 ### Decide after Phase 0
 
-- Initial audience and first-release user problem.
+- First-release problem, first learning goal, and the tangible thing learners
+  should make.
+- How the initial audience approaches technology and AI today; validate rather
+  than assume specific barriers or preferred tools.
 - First community model and permissions.
 - Initial learning hub and first work domain.
 - Knowledge-resource lifecycle and moderation.
@@ -853,9 +895,9 @@ development assistant:
 |---|---|---|
 | D-001 | Product identity | Fuego; current repository and README use this name |
 | D-002 | Core product direction | Conversation-first; Chat -> Community -> Knowledge -> Learning -> Creation |
-| D-003 | Initial audience and first release scope | Open; validate before expanding |
+| D-003 | Initial audience and first release scope | Audience decided: non-technical aspiring technology learners who are new to hands-on AI and want to learn by making. Founder hypothesis: explain simply how data is used to build/adapt a model and how a trained model turns input into output, then help learners narrow a broad problem to a specific use and make something. Validate with learners; exact first problem, pathway, project, and scope remain open. |
 | D-004 | Initial community model and public/private defaults | Open; design permissions explicitly |
-| D-005 | First learning pathway | AI Foundations and Python Foundations are candidates |
+| D-005 | First learning pathway | Founder hypothesis: begin with non-technical AI Awareness, distinguish model preparation from model use, then narrow a problem into a practical use and tangible project. Validate before committing; Python Foundations remains a candidate pathway. |
 | D-006 | First practical AI work domain | Open; select through user research |
 | D-007 | Knowledge object lifecycle and verification | Proposed; moderation and correction process needed |
 | D-008 | Search and discovery | Open; preserve permissions and avoid popularity-as-truth |

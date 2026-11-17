@@ -14,27 +14,25 @@ function RequireAuth ({ children }: { children: ReactNode }) {
 
 export default function App () {
   return (
-    <main>
-      <Routes>
-        <Route path="/auth" element={<UserAuth />} />
-        <Route
-          path="/"
-          element={
-            <RequireAuth>
-              <Chat />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/chats/:uri"
-          element={
-            <RequireAuth>
-              <Chat />
-            </RequireAuth>
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </main>
+    <Routes>
+      <Route path="/auth" element={<UserAuth />} />
+      <Route
+        path="/"
+        element={
+          <RequireAuth>
+            <Chat />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/chats/:uri"
+        element={
+          <RequireAuth>
+            <Chat />
+          </RequireAuth>
+        }
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }

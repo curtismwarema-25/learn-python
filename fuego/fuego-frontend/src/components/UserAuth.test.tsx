@@ -22,13 +22,12 @@ describe('Fuego authentication', () => {
   })
 
   it('creates an account, signs in, and returns to a requested chat invite', async () => {
-    const websocket = { close: vi.fn() }
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ id: 1 }))
       .mockResolvedValueOnce(jsonResponse({ auth_token: 'test-token' }))
       .mockResolvedValueOnce(jsonResponse({}))
       .mockResolvedValueOnce(jsonResponse({ messages: [] }))
-    vi.stubGlobal('WebSocket', vi.fn(() => websocket))
+    vi.stubGlobal('WebSocket', class { close = vi.fn() })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -49,7 +48,8 @@ describe('Fuego authentication', () => {
     fireEvent.click(screen.getByLabelText('Accept terms and Conditions'))
     fireEvent.click(screen.getByRole('button', { name: 'Sign up' }))
 
-    expect(await screen.findByText('Share the page URL to invite new friends')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Conversation' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Current conversation' })).toBeInTheDocument()
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
 
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
