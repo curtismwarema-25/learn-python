@@ -1,18 +1,24 @@
 """Views for the chat app."""
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.shortcuts import get_object_or_404
-
-from notifications.utils import notify
+from django.utils import timezone
 
 from rest_framework import permissions, status
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .channels import RabbitMQWebSocketChannel
-from .models import ChatSession, ChatSessionMessage, deserialize_user
+from .models import ChatSession, deserialize_user
+from .services import create_chat_message
+
+
+def _direct_chat_or_404(uri):
+    return get_object_or_404(
+        ChatSession.objects.filter(space_channel__isnull=True),
+        uri=uri
+    )
 
 
 class ChatSessionView(APIView):
@@ -22,7 +28,9 @@ class ChatSessionView(APIView):
 
     def post(self, request, *args, **kwargs):
         """Create a new chat session."""
-        chat_session = ChatSession.objects.create(owner=request.user)
+        with transaction.atomic():
+            chat_session = ChatSession.objects.create(owner=request.user)
+            chat_session.rotate_invite()
 
         return Response({
             'status': 'SUCCESS',
@@ -32,10 +40,7 @@ class ChatSessionView(APIView):
 
     def patch(self, request, *args, **kwargs):
         """Allow the chat owner to add a member."""
-        chat_session = get_object_or_404(
-            ChatSession,
-            uri=kwargs['uri']
-        )
+        chat_session = _direct_chat_or_404(kwargs['uri'])
 
         if chat_session.owner_id != request.user.id:
             raise PermissionDenied(
@@ -78,7 +83,7 @@ class ChatSessionMessageView(APIView):
 
     def get_authorized_chat(self, request, uri):
         """Return a chat only if the requester belongs to it."""
-        chat_session = get_object_or_404(ChatSession, uri=uri)
+        chat_session = _direct_chat_or_404(uri)
 
         is_owner = chat_session.owner_id == request.user.id
         is_member = chat_session.members.filter(
@@ -131,39 +136,10 @@ class ChatSessionMessageView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        chat_session_message = ChatSessionMessage.objects.create(
-            user=request.user,
-            chat_session=chat_session,
-            message=message
-        )
-
-        notification_message = {
-            'id': chat_session_message.id,
-            'user': deserialize_user(request.user),
-            'message': message
-        }
-        notification_channels = ['websocket']
-        if settings.CHAT_RABBITMQ_ENABLED:
-            notification_channels.append(RabbitMQWebSocketChannel.name)
-
-        notify(
-            source=request.user,
-            source_display_name=request.user.get_full_name(),
-            category='chat',
-            action='Sent',
-            obj=chat_session_message,
-            short_description='Sent a new message',
-            silent=True,
-            channels=notification_channels,
-            extra_data={
-                'uri': chat_session.uri,
-                'context': {
-                    'channel_layer': 'default',
-                    'destination': 'chat_%s' % chat_session.uri,
-                    'uri': chat_session.uri,
-                    'message': notification_message
-                }
-            }
+        chat_session_message = create_chat_message(
+            chat_session,
+            request.user,
+            message
         )
 
         return Response({
@@ -176,15 +152,28 @@ class ChatSessionMessageView(APIView):
 
 
 class ChatSessionJoinView(APIView):
-    """Join a chat session using its invite URI."""
+    """Join a chat session using its separate invite token."""
 
     permission_classes = (permissions.IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
+        token = request.data.get('token')
+        if not isinstance(token, str) or not token:
+            return Response(
+                {'token': ['This field is required.']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         chat_session = get_object_or_404(
-            ChatSession,
-            uri=kwargs['uri']
+            ChatSession.objects.filter(space_channel__isnull=True),
+            invite_token=token
         )
+
+        if (
+            chat_session.invite_expires_at is None
+            or chat_session.invite_expires_at <= timezone.now()
+        ):
+            raise NotFound('Invite link is invalid or expired.')
 
         if chat_session.owner_id != request.user.id:
             chat_session.members.get_or_create(user=request.user)
@@ -194,3 +183,54 @@ class ChatSessionJoinView(APIView):
             'uri': chat_session.uri,
             'message': 'Joined chat session'
         })
+
+
+class ChatSessionInviteView(APIView):
+    """View and manage an owner's revocable invite link."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get_authorized_chat(self, request, uri):
+        chat_session = _direct_chat_or_404(uri)
+        if (
+            chat_session.owner_id != request.user.id
+            and not chat_session.members.filter(user=request.user).exists()
+        ):
+            raise NotFound('Chat session not found.')
+        return chat_session
+
+    def require_owner(self, chat_session, user):
+        if chat_session.owner_id != user.id:
+            raise PermissionDenied('Only the chat owner can manage invites.')
+
+    def invite_response(self, chat_session, can_manage):
+        active = (
+            can_manage
+            and chat_session.invite_token
+            and chat_session.invite_expires_at
+            and chat_session.invite_expires_at > timezone.now()
+        )
+        return {
+            'can_manage': can_manage,
+            'token': chat_session.invite_token if active else None,
+            'expires_at': (
+                chat_session.invite_expires_at if can_manage else None
+            ),
+        }
+
+    def get(self, request, *args, **kwargs):
+        chat_session = self.get_authorized_chat(request, kwargs['uri'])
+        can_manage = chat_session.owner_id == request.user.id
+        return Response(self.invite_response(chat_session, can_manage))
+
+    def post(self, request, *args, **kwargs):
+        chat_session = self.get_authorized_chat(request, kwargs['uri'])
+        self.require_owner(chat_session, request.user)
+        chat_session.rotate_invite()
+        return Response(self.invite_response(chat_session, True))
+
+    def delete(self, request, *args, **kwargs):
+        chat_session = self.get_authorized_chat(request, kwargs['uri'])
+        self.require_owner(chat_session, request.user)
+        chat_session.revoke_invite()
+        return Response(self.invite_response(chat_session, True))

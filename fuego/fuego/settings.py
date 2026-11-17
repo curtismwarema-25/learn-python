@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'djoser',
     'chat',
+    'community',
     'notifications',
 ]
 

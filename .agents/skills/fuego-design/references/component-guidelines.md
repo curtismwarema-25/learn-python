@@ -37,6 +37,19 @@ keyboard navigation, and a real new-conversation action. Add search and
 management only when those actions are supported. Include empty, loading, and
 failure states. Never use hard-coded sample conversations as live content.
 
+## Community Spaces
+
+- Keep Space discovery limited to the public name, purpose, and description;
+  never expose member-only content, rosters, or invite tokens to visitors.
+- State whether a Space is private or discoverable and explain the actual
+  request, approval, or invitation path before users act.
+- Show role names as text and expose management controls only to roles the API
+  allows; backend authorization remains authoritative.
+- Use compact, readable lists for Spaces and members. Do not turn each row into
+  a decorative dashboard card.
+- Do not add channel, discussion, resource, moderation, or AI destinations
+  until the corresponding functionality exists.
+
 ## Messages
 
 - Give messages a readable width and clear sender attribution.
@@ -60,6 +73,16 @@ failure states. Never use hard-coded sample conversations as live content.
 - Do not add attachment, microphone, file context, task assistance, or AI
   controls before their behavior and API contracts exist.
 - Do not make keyboard shortcuts the only way to send or edit a message.
+
+## Invite links
+
+- Keep invite state grouped with the conversation context and describe whether
+  the link is active, unavailable, or expired in text.
+- Show management controls only when the server confirms the user can manage
+  invites; use concise, labeled secondary actions.
+- Make expiry visible, confirm rotation or revocation, and announce success or
+  failure without relying on color alone.
+- Never present an expired or revoked invite as usable.
 
 ## Buttons and icon buttons
 

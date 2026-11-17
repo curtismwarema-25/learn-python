@@ -16,12 +16,12 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'fuego.settings')
 
 django_asgi_application = get_asgi_application()
 
-from chat.auth import TokenAuthMiddleware
 from chat.routing import websocket_urlpatterns
+from community.routing import websocket_urlpatterns as community_websocket_urlpatterns
 
 application = ProtocolTypeRouter({
     'http': django_asgi_application,
-    'websocket': TokenAuthMiddleware(
-        URLRouter(websocket_urlpatterns)
+    'websocket': URLRouter(
+        [*websocket_urlpatterns, *community_websocket_urlpatterns]
     ),
 })

@@ -1,9 +1,41 @@
 """Bridge RabbitMQ chat messages to a uWSGI WebSocket connection."""
 
+import json
 import os
-from urllib.parse import parse_qs
+import time
 
 import pika
+
+
+WEBSOCKET_AUTH_TIMEOUT_SECONDS = 5
+
+
+def _receive_token(uwsgi):
+    """Receive a token from the first WebSocket frame within a short deadline."""
+    deadline = time.monotonic() + WEBSOCKET_AUTH_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            frame = uwsgi.websocket_recv_nb()
+        except OSError:
+            return None
+
+        if frame:
+            try:
+                payload = json.loads(frame)
+            except (TypeError, ValueError):
+                return None
+
+            if (
+                isinstance(payload, dict)
+                and payload.get('type') == 'authenticate'
+                and isinstance(payload.get('token'), str)
+                and payload['token']
+            ):
+                return payload['token']
+            return None
+
+        time.sleep(0.01)
+    return None
 
 
 def _is_chat_member(uri, token_key):
@@ -28,7 +60,7 @@ def _is_chat_member(uri, token_key):
 
     return (
         ChatSession.objects
-        .filter(uri=uri)
+        .filter(uri=uri, space_channel__isnull=True)
         .filter(
             Q(owner_id=token.user_id)
             | Q(members__user_id=token.user_id)
@@ -42,16 +74,24 @@ def application(env, start_response):
     import uwsgi
 
     uri = env.get('PATH_INFO', '').rstrip('/').rsplit('/', 1)[-1]
-    query = parse_qs(env.get('QUERY_STRING', ''))
-    token_key = query.get('token', [''])[0]
 
-    if not uri or not token_key or not _is_chat_member(uri, token_key):
+    if not uri:
         body = b'Forbidden'
         start_response('403 Forbidden', [
             ('Content-Type', 'text/plain'),
             ('Content-Length', str(len(body)))
         ])
         return [body]
+
+    uwsgi.websocket_handshake(
+        env['HTTP_SEC_WEBSOCKET_KEY'],
+        env.get('HTTP_ORIGIN', '')
+    )
+    token_key = _receive_token(uwsgi)
+    if not token_key or not _is_chat_member(uri, token_key):
+        return []
+
+    uwsgi.websocket_send(json.dumps({'type': 'authenticated'}))
 
     connection = pika.BlockingConnection(
         pika.ConnectionParameters(
@@ -70,11 +110,6 @@ def application(env, start_response):
         result = channel.queue_declare(exclusive=True)
         queue_name = result.method.queue
         channel.queue_bind(exchange=uri, queue=queue_name)
-
-        uwsgi.websocket_handshake(
-            env['HTTP_SEC_WEBSOCKET_KEY'],
-            env.get('HTTP_ORIGIN', '')
-        )
 
         for method_frame, _, body in channel.consume(
             queue_name,

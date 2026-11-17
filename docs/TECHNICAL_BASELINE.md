@@ -4,7 +4,7 @@
 |---|---|
 | Status | Verified repository snapshot; not a production-readiness assessment |
 | Reviewed | 2026-11-17 |
-| Repository reference | Branch `main`, commit `a55a4f8`; workspace also contains uncommitted changes |
+| Repository reference | Branch `main`, base commit `029a571`; this update is uncommitted |
 | Scope | Django backend, React frontend, configuration, tests, and tracked project files |
 
 This document records what was verified in the repository and local development
@@ -14,15 +14,16 @@ code, dependency, or configuration changes.
 
 ## 1. Executive summary
 
-Fuego is currently a small chat application with a Django REST backend and a
-React + TypeScript frontend. It supports account registration and token login,
-creating a chat, joining via a shareable URI, reading and sending messages, and
-receiving real-time updates over WebSockets.
+Fuego is a Django REST backend and React + TypeScript frontend. The implemented
+product includes direct chat and Community Spaces with shared channels: users
+can create private Spaces, discover public metadata, request or accept
+membership, manage roles and invitations, and participate in Space channel
+conversations. Knowledge, learning, and AI workflow capabilities remain
+unimplemented.
 
-The current checkout does **not** implement the broader product described in
-the [Fuego master](./FUEGO_MASTER.md): there are no implemented community
-spaces, reusable knowledge system, learning pathways, or AI workflow features.
-The `notes` directory is only a placeholder.
+The checkout does **not** implement the remaining broader product described in
+the [Fuego master](./FUEGO_MASTER.md), including reusable knowledge, learning
+pathways, or AI workflow features. The `notes` directory is only a placeholder.
 
 The capability-by-capability comparison and selected backend milestone are in
 the [Fuego backend implementation audit](./BACKEND_IMPLEMENTATION_AUDIT.md).
@@ -44,12 +45,9 @@ this repository as production-ready on the basis of these tests.
 
 ### Snapshot reference
 
-- Application source was inspected at `main` / `a55a4f8` and the modified
-  local workspace. Findings include uncommitted changes and are not a claim
-  about the commit alone.
-- The working tree was not clean at review time. This baseline describes the
-  local checkout and does not imply that its source or documentation changes
-  are committed.
+- Application source was inspected at `main` / `029a571` and the modified
+  local workspace. Findings include the uncommitted changes described here
+  and are not a claim about the base commit alone.
 - Database row contents were not inspected. An aggregate-only check found
   four chat sessions, no membership rows, and no duplicate chat URIs or
   memberships.
@@ -96,15 +94,18 @@ Vite build.
 1. The browser serves the frontend through Vite during local development.
 2. The frontend sends HTTP requests to the same hostname on port `8000`.
 3. Django serves authentication and chat REST endpoints.
-4. The ASGI application routes WebSocket connections through token
-   authentication and the chat consumer.
-5. The consumer checks that the authenticated user owns or belongs to the
-   requested chat before accepting the connection.
+4. The ASGI application routes direct-chat WebSockets and Space-channel
+   WebSockets to separate consumers.
+5. Consumers authenticate the DRF token from the first WebSocket frame. Direct
+   chat checks chat membership; Space channels check current Space membership
+   before joining the group and recheck authorization before frames and events.
 6. Message creation publishes a notification to the default Channels layer.
 
 The default channel layer is `InMemoryChannelLayer`. It is appropriate for a
 single local server process, not shared delivery across multiple server
-processes.
+processes. The optional uWSGI/RabbitMQ bridge is separately configured and
+excluded from channel-backed sessions; its direct-chat delivery loop does not
+revalidate access after connection.
 
 ## 4. Implemented behavior
 
@@ -120,63 +121,106 @@ processes.
 
 Relevant implementation:
 [`fuego/fuego/urls.py`](../fuego/fuego/urls.py),
-[`fuego/chat/auth.py`](../fuego/chat/auth.py),
 [`fuego/fuego-frontend/src/components/UserAuth.tsx`](../fuego/fuego-frontend/src/components/UserAuth.tsx).
 
 ### Chat API and access rules
 
 | Method and path | Verified behavior |
 |---|---|
-| `POST /api/chats/` | Authenticated user creates a chat and receives its URI. |
+| `POST /api/chats/` | Authenticated user creates a chat and receives its URI; a seven-day invite is created. |
 | `PATCH /api/chats/{uri}/` | Chat owner adds a user by username. |
-| `POST /api/chats/{uri}/join/` | Authenticated visitor joins the chat associated with the URI. |
+| `GET /api/chats/{uri}/invite/` | Chat members can check invite-management availability; only the owner receives the active token. |
+| `POST /api/chats/{uri}/invite/` | Owner rotates the invite; the prior link is invalidated and the new link expires after seven days. |
+| `DELETE /api/chats/{uri}/invite/` | Owner revokes the active invite; existing members keep their access. |
+| `POST /api/chats/invites/join/` | Authenticated visitor submits an invite token in the request body and joins the chat. |
 | `GET /api/chats/{uri}/messages/` | Owner or member reads that chat's messages. |
 | `POST /api/chats/{uri}/messages/` | Owner or member sends a non-empty message up to 2,000 characters. |
-| `WS /ws/chats/{uri}/?token=...` | Active owner or member connects for real-time updates. |
+| `WS /ws/chats/{uri}/` | Client authenticates with `{"type":"authenticate","token":"…"}` as its first frame; the token is not accepted from the URL. |
+| `GET /api/spaces/{id}/channels/` | Active Space member lists its channels. |
+| `POST /api/spaces/{id}/channels/` | Space owner/admin creates a channel. |
+| `GET/PATCH/DELETE /api/spaces/{id}/channels/{channel_id}/` | Active member reads channel metadata; owner/admin edits, archives, restores, or deletes only an empty channel. |
+| `GET/POST /api/spaces/{id}/channels/{channel_id}/messages/` | Active Space member reads channel history or sends a message; archived channels are read-only. |
+| `WS /ws/spaces/{id}/channels/{channel_id}/` | First-frame token authentication; current Space membership is verified before subscription and delivery. |
 
 The message API returns all messages for a chat; pagination is not implemented.
-An authenticated user with a chat URI can join through the join endpoint. The
-frontend calls this endpoint when opening a chat invite.
+Chat identifiers and invite tokens are separate. New invitation links use
+`/invites/{token}` in the frontend and are managed by the owner. Invites expire
+after seven days; rotating or revoking one prevents future joins but does not
+remove existing members. Joined members retain access to the full chat history.
+The `uri` alone no longer grants membership.
 
 The REST API defaults to authenticated access. Message reads and writes also
-check chat ownership or membership. The owner-only member-add operation rejects
-other users. WebSocket connections apply a corresponding membership check.
+check chat ownership or membership and explicitly exclude channel-backed
+conversations. The owner-only member-add operation rejects other users.
+WebSocket authentication, token activity, account activity, and direct-chat
+membership are checked before delivery on the default Channels path.
+Space-channel authorization is based on current Space membership, not
+`ChatSession.owner` or `ChatSessionMember`. The optional uWSGI bridge excludes
+channel sessions but checks direct-chat access at connection time only.
 
 Relevant implementation:
 [`fuego/chat/urls.py`](../fuego/chat/urls.py),
 [`fuego/chat/views.py`](../fuego/chat/views.py),
 [`fuego/chat/consumers.py`](../fuego/chat/consumers.py),
-[`fuego/chat/routing.py`](../fuego/chat/routing.py).
+[`fuego/chat/routing.py`](../fuego/chat/routing.py),
+[`fuego/chat/websocket.py`](../fuego/chat/websocket.py),
+[`fuego/chat/migrations/0003_chatsession_invite_token_and_expiry.py`](../fuego/chat/migrations/0003_chatsession_invite_token_and_expiry.py).
 
 ### Data model
 
 The `chat` app defines:
 
-- `ChatSession`: owner, generated URI, and create/update timestamps.
+- `ChatSession`: owner, generated URI, separate nullable invite token and
+  expiry, and create/update timestamps.
 - `ChatSessionMember`: user-to-chat membership and timestamps.
 - `ChatSessionMessage`: user, chat, message text, and timestamps.
 
 The project uses Django's built-in user model. The checked-in initial chat
-migration creates these three models. No learning, community, or knowledge
-models were found in the active app configuration.
+migration creates the three chat models.
 
-The model and migration `0002_alter_chatsession_uri_and_more.py` enforce
-database uniqueness for chat URIs and `(chat_session, user)` membership pairs.
-This migration was not applied to the tracked local database during the audit;
-apply it before using the constraints in that database. The aggregate check
-found no conflicting rows in the current local database.
+Migration `0002_alter_chatsession_uri_and_more.py` enforces database uniqueness
+for chat URIs and `(chat_session, user)` membership pairs. Migration
+`0003_chatsession_invite_token_and_expiry.py` adds separate invite fields and
+backfills existing chats with seven-day invite links. Both migrations are
+pending on the tracked local database; apply them before using this code with
+that database.
+
+The `community` app defines `Space`, `SpaceMembership`, `SpaceJoinRequest`,
+and `Channel`. A Channel has a one-to-one `ChatSession` for message storage and
+notifications, and a per-Space unique slug. The Space owner is stored directly
+on `Space`; other active members have one of the Administrator, Moderator, or
+Member roles. Spaces are private by default, with optional metadata-only
+discovery. Space content, channel messages, member rosters, requests, and
+invitation tokens are protected by server-side checks.
+
+New Spaces receive a default `general` channel. The Channels data migration
+backfills existing Spaces. Channel history is preserved by archiving; channel
+and Space deletion are blocked when relevant message history exists. The
+Community migrations `0001` and `0002` are pending on the tracked local
+database, as are chat migrations `0002` and `0003`. The `0002_channel` data
+migration is intentionally irreversible to avoid orphaning channel
+conversations if rolled back.
 
 Relevant implementation:
 [`fuego/chat/models.py`](../fuego/chat/models.py),
 [`fuego/chat/migrations/0001_initial.py`](../fuego/chat/migrations/0001_initial.py),
 [`fuego/chat/migrations/0002_alter_chatsession_uri_and_more.py`](../fuego/chat/migrations/0002_alter_chatsession_uri_and_more.py).
+Community implementation:
+[`fuego/community/models.py`](../fuego/community/models.py),
+[`fuego/community/views.py`](../fuego/community/views.py),
+[`fuego/community/consumers.py`](../fuego/community/consumers.py),
+[`fuego/community/migrations/0001_initial.py`](../fuego/community/migrations/0001_initial.py),
+[`fuego/community/migrations/0002_channel.py`](../fuego/community/migrations/0002_channel.py).
 
 ### Frontend
 
-The app defines `/auth`, `/`, and `/chats/:uri` routes. It supports
-registration/sign-in, starting a chat, joining an invite, loading messages,
-sending messages, and displaying WebSocket updates and errors. The API helper
-validates several response shapes before components use them.
+The app defines `/auth`, `/`, `/chats/:uri`, `/invites/:inviteToken`,
+`/spaces`, `/spaces/:spaceId`,
+`/spaces/:spaceId/channels/:channelId`, and
+`/spaces/invites/:inviteToken` routes. It supports registration/sign-in, direct
+chat, a Space directory and creation, join requests, membership and channel
+management, invite joining, channel messages, and WebSocket updates. The API
+helper validates response shapes before components use them.
 
 The frontend assumes the Django server is available on port `8000`; that
 address is constructed in
@@ -186,7 +230,8 @@ exhaustion, and message-history synchronization after reconnection.
 
 ### Not implemented
 
-- Community spaces, roles, moderation, or discovery.
+- Content moderation/reporting, private/restricted channels, and separate
+  structured discussion or resource models.
 - A searchable knowledge base or reusable discussion content.
 - Learning hubs, pathways, lessons, activities, or progress tracking.
 - AI provider integrations or workflow-learning features.
@@ -234,17 +279,19 @@ Commands were run on **2026-11-17** in the local environment.
 |---|---|
 | `python manage.py check` | **Passed:** no system-check issues. |
 | `python manage.py makemigrations --check --dry-run` | **Passed:** no model changes detected that require a migration. |
-| `python manage.py test chat` | **Passed:** 16 backend tests. |
+| `python manage.py test chat community` | **Passed:** 56 backend tests, including channel API permissions, direct-chat isolation, optional bridge exclusion, membership revocation, and WebSocket delivery. |
 | Frontend `npm run typecheck` | **Passed.** |
-| Frontend `npm test` | **Passed:** 5 tests in 2 test files. |
+| Frontend `npm test` | **Passed:** 12 tests in 3 test files, including channel history, message sending/deduplication, and archived-channel read-only behavior. |
 | Frontend `npm run build` | **Passed:** TypeScript check and Vite production build. |
+| `scripts/validate-fuego.ps1 -Scope all` | **Passed:** frontend tests/build, Django checks, migration consistency, 56 backend tests, and whitespace check. |
+| Browser/device accessibility review | **Not performed:** automated tests do not verify rendered behavior across devices or full WCAG conformance. |
 
 Run backend checks from the repository root with an explicit app label:
 
 ```powershell
 .\.venv\Scripts\python.exe .\fuego\manage.py check
 .\.venv\Scripts\python.exe .\fuego\manage.py makemigrations --check --dry-run
-.\.venv\Scripts\python.exe .\fuego\manage.py test chat
+.\.venv\Scripts\python.exe .\fuego\manage.py test chat community
 ```
 
 Running `manage.py test` from the repository root **without** an app label
@@ -262,10 +309,11 @@ Pop-Location
 ```
 
 Backend tests cover registration/token login, ownership and membership
-permissions, invite joining, message access, database uniqueness, and
-WebSocket access/delivery. The RabbitMQ publisher test mocks the connection;
-it does not validate a live RabbitMQ/uWSGI deployment. Frontend tests cover
-authentication and chat/reconnect scenarios.
+permissions, invite joining, message access, database uniqueness, direct-chat
+isolation, Space channel permissions, and WebSocket access/delivery. The
+RabbitMQ publisher test mocks the connection; it does not validate a live
+RabbitMQ/uWSGI deployment. Frontend tests cover authentication,
+chat/reconnect, and Space channel scenarios.
 
 These automated checks do not establish that the full stack has been manually
 walked through in a browser, that real-time delivery works across multiple
@@ -273,17 +321,21 @@ processes, or that deployment and operations are ready.
 
 ## 7. Security and operational findings
 
-These are source-level findings for follow-up, not a formal security audit.
+These are source-level findings and mitigations, not a formal security audit.
 
 | Priority | Finding | Status / next verification |
 |---|---|---|
 | Blocker for public deployment | Development settings enable `DEBUG`, use a hard-coded development-marked key, leave `ALLOWED_HOSTS` empty, and allow all CORS origins. | **Verified.** Introduce and validate a separate production configuration before deployment; do not expose the development key. |
-| High | The WebSocket token is supplied in the query string. | **Verified.** Review proxy, application, and analytics logging; choose and document a safer production transport. |
+| Medium | WebSocket authentication uses the first client frame rather than the URL; the browser selects `wss:` only when the page/API uses HTTPS. | **Query-string transport removed and tested.** Production TLS termination and logging configuration remain unverified; require HTTPS/WSS in deployment. |
+| Medium | Chat user objects previously included email and legal names. | **Mitigated.** Message, member, and live-event user objects now expose only usernames; this approved response-shape change may affect external consumers. |
+| Medium | Existing sockets previously retained access after token or membership changes. | **Mitigated on the default Channels path.** Token validity, account activity, and chat membership are rechecked before delivery. An idle socket remains open until its next event, per the approved policy. |
+| Medium | Optional uWSGI bridge does not revalidate direct-chat access after connection. | **Open.** Channel-backed sessions are excluded. For direct chats, first-frame token authentication is implemented and query-string auth removed, but this bridge still needs token/account/member checks before each forwarded event. uWSGI is unavailable locally; the protocol is covered only by mocked tests. |
+| Medium | Chat URIs previously doubled as durable join secrets. | **Mitigated in source.** Separate owner-managed invite tokens expire after seven days and can be rotated or revoked. Existing members retain access and history; invite links remain bearer links until expiry or revocation. |
 | High | The default in-memory channel layer is process-local. | **Verified.** Multi-worker or multi-instance message delivery is not established; select and test a shared channel layer before scaling. |
 | High | SQLite is the configured database and the database file is tracked. | **Verified.** Row contents were not inspected; only aggregate counts and duplicate checks were run. Decide how user data is protected, backed up, restored, and kept out of source control. |
 | Medium | CORS allows all origins; DRF also enables Basic and Session authentication. | **Verified.** Reassess allowed origins and authentication methods for the intended deployment and transport. |
 | Medium | No DRF throttling configuration was found. | **Verified in settings.** Define abuse/rate controls appropriate to public registration, login, and message endpoints. |
-| Medium | Chat history has no pagination; migration `0002` adds database uniqueness for URIs and memberships. | **Verified in source.** The migration is pending on the tracked local database; apply it before using this database with the updated model. Review history volume before expansion. |
+| Medium | Chat history has no pagination; channel history also reuses the unpaginated message store. | **Verified in source.** Chat migrations `0002`/`0003` and Community migrations `0001`/`0002` are pending on the tracked local database; apply them before using this database with the updated models. Review history volume before expansion. |
 | Medium | The RabbitMQ/uWSGI bridge depends on separately provisioned services and is outside the standard local setup. | **Verified in source and setup docs; not live-tested.** Treat as experimental until deployment and failure behavior are exercised. |
 | Low | Tracked files include Python bytecode caches and pre-access-control source snapshots. | **Verified in the tracked-file inventory.** Decide on repository hygiene separately; ensure snapshot files are not mistaken for active code. |
 
@@ -304,7 +356,8 @@ Before calling Phase 0 complete:
    message history, message sending, and live updates in the local app.
 2. Demonstrate that a non-member cannot read messages, send messages, or open
    the WebSocket, and that only the owner can add members.
-3. Decide whether joining by possession of a URI is the intended invite policy.
+3. Demonstrate that invite tokens expire, owner rotation/revocation works, old
+   URI-only joins are rejected, and revocation does not remove existing members.
 4. The founder has selected non-technical aspiring technology learners who
    are new to hands-on AI and want to learn by making. The founder's current
    learning hypothesis is to explain simply how data is used to build or adapt
@@ -329,7 +382,7 @@ behavior.
   [`urls.py`](../fuego/fuego/urls.py).
 - Chat models, API, and WebSockets: [`models.py`](../fuego/chat/models.py),
   [`views.py`](../fuego/chat/views.py), [`consumers.py`](../fuego/chat/consumers.py),
-  [`auth.py`](../fuego/chat/auth.py).
+  and migration [`0003_chatsession_invite_token_and_expiry.py`](../fuego/chat/migrations/0003_chatsession_invite_token_and_expiry.py).
 - Backend tests: [`tests.py`](../fuego/chat/tests.py).
 - Frontend setup and scripts: [`package.json`](../fuego/fuego-frontend/package.json),
   [`fuego-frontend README`](../fuego/fuego-frontend/README.md).

@@ -40,7 +40,9 @@ if ($Scope -eq 'backend' -or $Scope -eq 'all') {
 
   Invoke-Check 'Django system checks' { & $python $manageScript check }
   Invoke-Check 'Django migration consistency' { & $python $manageScript makemigrations --check --dry-run }
-  Invoke-Check 'Django chat tests' { & $python $manageScript test chat }
+  Invoke-Check 'Django chat and community tests' {
+    & $python $manageScript test chat community
+  }
 }
 
 Invoke-Check 'Git whitespace check' { git -C $repositoryRoot diff --check }

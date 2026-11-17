@@ -49,9 +49,14 @@ Fuego to programming education. Learning hubs may cover AI foundations,
 Python, algorithms, data, machine learning, practical AI, and other topics as
 real learner needs are validated.
 
-**Current implementation:** a Django chat backend and a React + TypeScript
-single-page frontend. The community, knowledge, learning, and AI-workflow
-capabilities described here are primarily proposed, not implemented.
+**Current implementation:** a Django chat backend and React + TypeScript
+single-page frontend, including the approved Community Space foundation
+(private Spaces, discoverable metadata, membership requests/invites, roles,
+ownership management, and shared `general`-first channel conversations).
+Knowledge, learning, and AI-workflow capabilities remain proposed or deferred;
+see the
+[Community implementation specification](./COMMUNITY_IMPLEMENTATION_SPEC.md)
+and [Technical Baseline](./TECHNICAL_BASELINE.md) for verified scope.
 
 ## 2. Document purpose and status labels
 
@@ -520,8 +525,8 @@ products without a validated reason.
 
 ## 12. User journeys
 
-These journeys illustrate the intended product model; they are not implemented
-flows today.
+These journeys illustrate the intended end-to-end product model. Some Space
+foundation flows exist, but these complete journeys are not implemented.
 
 - **Curious beginner:** asks a question in chat, joins a topic community,
   finds an explanation, tries an optional activity, and shares what helped.
@@ -555,19 +560,25 @@ implementation inventory, verification commands, and open operational risks.
 - The `chat` app defines chat sessions, messages, and membership. API views
   support chat creation, owner-managed membership, invite joining, message
   retrieval, and message creation. Message access checks ownership or
-  membership.
-- The ASGI application routes HTTP to Django and WebSockets through
-  token-auth middleware. The chat consumer checks active authentication and
-  chat membership before accepting a WebSocket.
+  membership. Channel-backed conversations are excluded from direct-chat
+  APIs.
+- The `community` app defines Spaces, membership, join requests, and Channels.
+  New Spaces receive a `general` channel; existing Spaces are backfilled by a
+  data migration. Channel messages reuse chat message storage and are
+  authorized by current Space membership.
+- The ASGI application routes HTTP to Django and WebSockets through separate
+  direct-chat and Space-channel consumers. Both authenticate a DRF token from
+  the first frame and recheck authorization before frames and message events.
 - The normal channel layer is `InMemoryChannelLayer`, suitable for local
   single-process use rather than multi-process production delivery.
 - Optional RabbitMQ publishing and a uWSGI WebSocket bridge exist behind
   settings and separate deployment requirements. Treat this path as
   experimental; it is not the default Windows development setup.
 - The frontend is React + TypeScript with Vite and React Router, not Vue. It
-  currently contains `/auth`, `/`, and `/chats/:uri` routes, sign-up/sign-in,
-  chat creation, invite joining, message history, REST message sending, and
-  WebSocket updates.
+  contains direct-chat, Space directory/management, and Space-channel routes,
+  sign-up/sign-in, invite joining, message history, REST message sending, and
+  WebSocket updates. WebSocket credentials are sent in the first frame rather
+  than the connection URL.
 - Frontend dependencies include Bootstrap CSS bundled locally. Frontend
   tests cover authentication flows; backend tests cover authentication,
   chat access control, invitation joining, and WebSocket behavior.
@@ -582,9 +593,10 @@ implementation inventory, verification commands, and open operational risks.
 - **Development-only settings:** `DEBUG` is enabled, `ALLOWED_HOSTS` is empty,
   and CORS is permissive. A development-marked secret key is hard-coded in
   settings. Do not use these settings or commit real secrets for production.
-- The frontend sends the DRF token as a WebSocket query parameter. Review
-  logging and deployment behavior so credentials are not retained in
-  inappropriate logs.
+- The optional uWSGI/RabbitMQ WebSocket bridge is excluded from channel-backed
+  sessions. For direct chats it authenticates from the first frame but does
+  not revalidate token, account, or membership before each forwarded event.
+  It is experimental and was not verified against a live uWSGI deployment.
 - The database is SQLite and the default channel layer is in-memory; scaling
   and production deployment have not been established here.
 - The RabbitMQ/uWSGI path has code and tests but should not be considered
@@ -614,10 +626,10 @@ Potential logical domains, to introduce only when needed:
 - AI integrations, usage controls, and evaluation.
 
 These are design boundaries, not instructions to create every app or model
-now. Possible future data concepts include `Community`,
-`CommunityMembership`, `KnowledgeResource`, `LearningHub`, `LearningPathway`,
-`Lesson`, `Activity`, `LearnerProgress`, `Workflow`, and `Project`. All are
-proposed; none should be mistaken for existing Django models.
+now. The current Community foundation uses `Space`, `SpaceMembership`, and
+`SpaceJoinRequest`. Other possible concepts include `KnowledgeResource`,
+`LearningHub`, `LearningPathway`, `Lesson`, `Activity`, `LearnerProgress`,
+`Workflow`, and `Project`; these remain proposals, not existing Django models.
 
 Keep API responsibilities aligned with existing conventions. Future endpoint
 families for communities, knowledge, learning, progress, and projects are
@@ -653,8 +665,9 @@ Future work must:
 - Provide human escalation for sensitive or high-impact workflows.
 
 The current development settings are not a production security baseline.
-Security configuration and the WebSocket token transport require review
-before deployment.
+Production security settings and WSS termination remain unverified. The
+optional uWSGI bridge still needs per-event authorization checks before it
+should be considered for deployment.
 
 ## 16. Unified roadmap
 
@@ -692,8 +705,12 @@ next.
 
 - **Problem:** people need topic-based belonging and peer support.
 - **Objective:** validate spaces and shared-interest discussion.
-- **Capabilities:** small number of topic spaces, membership, descriptions,
-  basic roles, onboarding, moderation, and discovery.
+- **Current status:** the approved Space foundation and initial shared
+  channels are implemented. Content moderation/reporting and knowledge
+  features remain deferred. See the
+  [Community implementation specification](./COMMUNITY_IMPLEMENTATION_SPEC.md).
+- **Capabilities:** topic Spaces, membership, descriptions, basic roles,
+  onboarding, shared channel conversations, and metadata discovery.
 - **Dependencies:** Phase 1.
 - **Outcome/acceptance:** a newcomer can find a relevant space, understand
   its purpose, participate safely, and get basic help.
@@ -896,7 +913,7 @@ development assistant:
 | D-001 | Product identity | Fuego; current repository and README use this name |
 | D-002 | Core product direction | Conversation-first; Chat -> Community -> Knowledge -> Learning -> Creation |
 | D-003 | Initial audience and first release scope | Audience decided: non-technical aspiring technology learners who are new to hands-on AI and want to learn by making. Founder hypothesis: explain simply how data is used to build/adapt a model and how a trained model turns input into output, then help learners narrow a broad problem to a specific use and make something. Validate with learners; exact first problem, pathway, project, and scope remain open. |
-| D-004 | Initial community model and public/private defaults | Open; design permissions explicitly |
+| D-004 | Initial community model and public/private defaults | Approved for the foundation slice: private by default; owner/admin may enable discoverable metadata-only listings; content stays member-only; discoverable Spaces accept approval requests or authenticated invites; roles are owner/admin/moderator/member; all initial channels share Space membership; channels reuse chat message streams and separate Discussions are deferred. Detailed moderation/report workflow remains open. |
 | D-005 | First learning pathway | Founder hypothesis: begin with non-technical AI Awareness, distinguish model preparation from model use, then narrow a problem into a practical use and tangible project. Validate before committing; Python Foundations remains a candidate pathway. |
 | D-006 | First practical AI work domain | Open; select through user research |
 | D-007 | Knowledge object lifecycle and verification | Proposed; moderation and correction process needed |

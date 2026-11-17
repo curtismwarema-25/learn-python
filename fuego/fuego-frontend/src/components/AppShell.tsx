@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 interface AppShellProps {
   children: ReactNode
   conversationUri: string | undefined
   username: string | null
-  creatingConversation: boolean
-  onNewConversation: () => void
+  creatingConversation?: boolean
+  onNewConversation?: () => void
 }
 
 function getInitial (value: string | null) {
@@ -20,6 +20,9 @@ export default function AppShell ({
   creatingConversation,
   onNewConversation
 }: AppShellProps) {
+  const location = useLocation()
+  const isSpaces = location.pathname.startsWith('/spaces')
+
   return (
     <div className="app-shell">
       <aside className="app-sidebar" aria-label="Primary">
@@ -30,12 +33,20 @@ export default function AppShell ({
 
         <nav className="primary-nav" aria-label="Workspace">
           <Link
-            className={`nav-item ${conversationUri ? '' : 'is-active'}`}
+            className={`nav-item ${conversationUri || isSpaces ? '' : 'is-active'}`}
             to="/"
-            aria-current={conversationUri ? undefined : 'page'}
+            aria-current={conversationUri || isSpaces ? undefined : 'page'}
           >
             <span className="nav-indicator" aria-hidden="true" />
             Home
+          </Link>
+          <Link
+            className={`nav-item ${isSpaces ? 'is-active' : ''}`}
+            to="/spaces"
+            aria-current={isSpaces ? 'page' : undefined}
+          >
+            <span className="nav-indicator" aria-hidden="true" />
+            Spaces
           </Link>
           {conversationUri && (
             <Link
@@ -49,26 +60,48 @@ export default function AppShell ({
           )}
         </nav>
 
-        <button
-          className="button button-primary new-conversation-button"
-          type="button"
-          onClick={onNewConversation}
-          disabled={creatingConversation}
+        <Link
+          className="mobile-space-link"
+          to="/spaces"
+          aria-current={isSpaces ? 'page' : undefined}
         >
-          <span className="button-plus" aria-hidden="true">+</span>
-          {creatingConversation ? 'Starting…' : 'New conversation'}
-        </button>
+          Spaces
+        </Link>
+
+        {!username && (
+          <Link className="mobile-sign-in-link" to="/auth">
+            Sign in
+          </Link>
+        )}
+
+        {onNewConversation && (
+          <button
+            className="button button-primary new-conversation-button"
+            type="button"
+            onClick={onNewConversation}
+            disabled={creatingConversation}
+          >
+            <span className="button-plus" aria-hidden="true">+</span>
+            {creatingConversation ? 'Starting…' : 'New conversation'}
+          </button>
+        )}
 
         <div className="sidebar-bottom">
-          <span className="account-avatar" aria-hidden="true">{getInitial(username)}</span>
-          <span className="account-name">{username || 'Your account'}</span>
+          {username
+            ? (
+              <>
+                <span className="account-avatar" aria-hidden="true">{getInitial(username)}</span>
+                <span className="account-name">{username}</span>
+              </>
+            )
+            : <Link to="/auth">Sign in</Link>}
         </div>
       </aside>
 
       <div className="app-main">
         <header className="app-topbar">
           <span className="topbar-label">
-            {conversationUri ? 'CONVERSATION' : 'YOUR SPACE'}
+            {isSpaces ? 'SPACES' : conversationUri ? 'CONVERSATION' : 'YOUR SPACE'}
           </span>
           {username && <span className="topbar-user">{username}</span>}
         </header>

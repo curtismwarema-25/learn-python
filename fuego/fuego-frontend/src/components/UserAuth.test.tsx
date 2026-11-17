@@ -25,13 +25,18 @@ describe('Fuego authentication', () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ id: 1 }))
       .mockResolvedValueOnce(jsonResponse({ auth_token: 'test-token' }))
-      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({ uri: 'joined-chat' }))
       .mockResolvedValueOnce(jsonResponse({ messages: [] }))
+      .mockResolvedValueOnce(jsonResponse({
+        can_manage: false,
+        token: null,
+        expires_at: null
+      }))
     vi.stubGlobal('WebSocket', class { close = vi.fn() })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
-      <MemoryRouter initialEntries={['/chats/invite-uri']}>
+      <MemoryRouter initialEntries={['/invites/invite-uri']}>
         <App />
       </MemoryRouter>
     )
@@ -50,14 +55,17 @@ describe('Fuego authentication', () => {
 
     expect(await screen.findByRole('heading', { name: 'Conversation' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Current conversation' })).toBeInTheDocument()
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5))
 
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       email: 'new-user@example.com',
       username: 'new_chat_user',
       password: 'StrongTestPassword123!'
     })
-    expect(String(fetchMock.mock.calls[2]?.[0])).toContain('/api/chats/invite-uri/join/')
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain('/api/chats/invites/join/')
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      token: 'invite-uri'
+    })
     expect(window.sessionStorage.getItem('authToken')).toBe('test-token')
   })
 

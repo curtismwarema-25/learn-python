@@ -6,8 +6,12 @@ from . import views
 urlpatterns = [
     path('chats/', views.ChatSessionView.as_view()),
     path(
-        'chats/<str:uri>/join/',
+        'chats/invites/join/',
         views.ChatSessionJoinView.as_view()
+    ),
+    path(
+        'chats/<str:uri>/invite/',
+        views.ChatSessionInviteView.as_view()
     ),
     path('chats/<str:uri>/', views.ChatSessionView.as_view()),
     path(
