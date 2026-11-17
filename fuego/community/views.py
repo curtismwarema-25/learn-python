@@ -45,6 +45,7 @@ from .serializers import (
     SpaceInviteJoinSerializer,
     SpaceOwnershipTransferSerializer,
     SpaceRoleUpdateSerializer,
+    SpaceSearchQuerySerializer,
     SpaceSummarySerializer,
     SpaceUpdateSerializer
 )
@@ -55,6 +56,7 @@ from .services import (
     ensure_default_channel,
     resource_reference_to_json
 )
+from .search import search_space
 
 
 User = get_user_model()
@@ -174,8 +176,6 @@ class MySpacesView(APIView):
                 context={'request': request}
             ).data
         )
-
-
 class SpaceDetailView(APIView):
     """Read public metadata or manage an accessible Space."""
 
@@ -442,6 +442,72 @@ class SpaceChannelMessagesView(APIView):
             for resource in resources
         ]
         return Response(message_data, status=status.HTTP_201_CREATED)
+
+
+class SpaceSearchView(APIView):
+    """Search active Space knowledge without exposing other conversations."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request, *args, **kwargs):
+        space = _space_or_404(kwargs['space_id'])
+        _require_space_member(space, request.user)
+
+        serializer = SpaceSearchQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        filters = serializer.validated_data
+
+        channel = None
+        channel_id = filters.get('channel_id')
+        if channel_id is not None:
+            if filters['content_type'] == 'resources':
+                raise ValidationError({
+                    'channel_id': [
+                        'A channel filter can only be used with discussions or all results.'
+                    ]
+                })
+            channel = get_object_or_404(
+                Channel.objects.filter(space_id=space.pk),
+                pk=channel_id
+            )
+
+        page = search_space(
+            space=space,
+            query=filters['q'],
+            content_type=filters['content_type'],
+            channel=channel,
+            start_date=filters.get('start_date'),
+            end_date=filters.get('end_date'),
+            page=filters['page'],
+            page_size=filters['page_size']
+        )
+        return Response({
+            'count': page.count,
+            'page': page.page,
+            'page_size': page.page_size,
+            'total_pages': page.total_pages,
+            'results': [
+                {
+                    'id': hit.source_id,
+                    'type': hit.content_type,
+                    'title': hit.title,
+                    'excerpt': hit.excerpt,
+                    'created_at': hit.created_at,
+                    'author': hit.author,
+                    'channel': (
+                        None
+                        if hit.channel_id is None
+                        else {
+                            'id': hit.channel_id,
+                            'name': hit.channel_name,
+                            'archived': hit.channel_archived
+                        }
+                    ),
+                    'source_domain': hit.source_domain
+                }
+                for hit in page.results
+            ]
+        })
 
 
 class SpaceResourcesView(APIView):

@@ -56,6 +56,7 @@ function ChannelConversation ({
   token: string | null
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const initialMessageHash = useRef(window.location.hash)
   const [draft, setDraft] = useState('')
   const [availableResources, setAvailableResources] = useState<SpaceResource[]>([])
   const [selectedResourceIds, setSelectedResourceIds] = useState<string[]>([])
@@ -69,6 +70,17 @@ function ChannelConversation ({
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>('connecting')
   const websocketRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    const targetHash = initialMessageHash.current
+    if (!targetHash.startsWith('#message-') || messages.length === 0) return
+
+    const target = document.getElementById(targetHash.slice(1))
+    initialMessageHash.current = ''
+    if (target && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'center' })
+    }
+  }, [messages])
 
   useEffect(() => {
     setMessages([])

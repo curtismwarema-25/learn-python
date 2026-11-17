@@ -21,6 +21,11 @@ urlpatterns = [
         name='resource-detail'
     ),
     path(
+        'spaces/<uuid:space_id>/search/',
+        views.SpaceSearchView.as_view(),
+        name='search'
+    ),
+    path(
         'spaces/invites/join/',
         views.SpaceInviteJoinView.as_view(),
         name='invite-join'

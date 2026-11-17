@@ -13,7 +13,10 @@ export default function ChatMessage ({
   spaceId
 }: ChatMessageProps) {
   return (
-    <article className={`message ${isOwnMessage ? 'message-own' : 'message-peer'}`}>
+    <article
+      id={spaceId ? `message-${message.id}` : undefined}
+      className={`message ${isOwnMessage ? 'message-own' : 'message-peer'}`}
+    >
       <div className="message-author">
         {isOwnMessage ? 'YOU' : message.user.username}
       </div>

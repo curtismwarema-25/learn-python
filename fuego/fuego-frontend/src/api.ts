@@ -43,6 +43,31 @@ export interface SpaceChannel {
   updateDate: string
 }
 
+export type SpaceSearchContentType = 'all' | 'discussions' | 'resources'
+
+export interface SpaceSearchResult {
+  id: string
+  type: 'discussion' | 'resource'
+  title: string
+  excerpt: string
+  createdAt: string
+  author: string | null
+  channel: {
+    id: string
+    name: string
+    archived: boolean
+  } | null
+  sourceDomain: string | null
+}
+
+export interface SpaceSearchResponse {
+  count: number
+  page: number
+  pageSize: number
+  totalPages: number
+  results: SpaceSearchResult[]
+}
+
 export interface ChatInvite {
   canManage: boolean
   token: string | null
@@ -92,6 +117,10 @@ export interface SpaceInvite {
 
 function isRecord (value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isInteger (value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value)
 }
 
 const SPACE_ROLES: SpaceRole[] = ['owner', 'administrator', 'moderator', 'member']
@@ -279,6 +308,95 @@ export function parseSpaceChannels (value: unknown): SpaceChannel[] {
     throw new Error('The server returned an invalid Space channel list.')
   }
   return value.map(parseSpaceChannel)
+}
+
+export function parseSpaceSearchResponse (value: unknown): SpaceSearchResponse {
+  if (!isRecord(value)) {
+    throw new Error('The server returned an invalid Space search response.')
+  }
+
+  const { count, page, page_size: pageSize, total_pages: totalPages, results } = value
+  if (
+    !isInteger(count) ||
+    count < 0 ||
+    !isInteger(page) ||
+    page < 1 ||
+    !isInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > 50 ||
+    !isInteger(totalPages) ||
+    totalPages < 0 ||
+    !Array.isArray(results)
+  ) {
+    throw new Error('The server returned an invalid Space search response.')
+  }
+
+  const expectedPages = Math.ceil(count / pageSize)
+  if (
+    totalPages !== expectedPages ||
+    results.length > pageSize
+  ) {
+    throw new Error('The server returned an invalid Space search page.')
+  }
+
+  return {
+    count,
+    page,
+    pageSize,
+    totalPages,
+    results: results.map(parseSpaceSearchResult)
+  }
+}
+
+function parseSpaceSearchResult (value: unknown): SpaceSearchResult {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    (value.type !== 'discussion' && value.type !== 'resource') ||
+    typeof value.title !== 'string' ||
+    typeof value.excerpt !== 'string' ||
+    typeof value.created_at !== 'string' ||
+    Number.isNaN(Date.parse(value.created_at)) ||
+    !(value.author === null || typeof value.author === 'string') ||
+    !(value.source_domain === null || typeof value.source_domain === 'string')
+  ) {
+    throw new Error('The server returned an invalid Space search result.')
+  }
+
+  let channel: SpaceSearchResult['channel'] = null
+  if (value.channel !== null) {
+    if (
+      !isRecord(value.channel) ||
+      typeof value.channel.id !== 'string' ||
+      typeof value.channel.name !== 'string' ||
+      typeof value.channel.archived !== 'boolean'
+    ) {
+      throw new Error('The server returned an invalid search channel.')
+    }
+    channel = {
+      id: value.channel.id,
+      name: value.channel.name,
+      archived: value.channel.archived
+    }
+  }
+
+  if (
+    (value.type === 'discussion' && channel === null) ||
+    (value.type === 'resource' && channel !== null)
+  ) {
+    throw new Error('The server returned a mismatched search source.')
+  }
+
+  return {
+    id: value.id,
+    type: value.type,
+    title: value.title,
+    excerpt: value.excerpt,
+    createdAt: value.created_at,
+    author: value.author,
+    channel,
+    sourceDomain: value.source_domain
+  }
 }
 
 export function parseSpaceChannelMessages (value: unknown): {

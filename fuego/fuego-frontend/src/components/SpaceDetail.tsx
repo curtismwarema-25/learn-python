@@ -370,6 +370,12 @@ export default function SpaceDetail () {
               <p className="space-resource-entry">
                 <Link
                   className="button button-secondary"
+                  to={`/spaces/${encodeURIComponent(space.id)}/search`}
+                >
+                  Search this Space
+                </Link>
+                <Link
+                  className="button button-secondary"
                   to={`/spaces/${encodeURIComponent(space.id)}/resources`}
                 >
                   Open resource library

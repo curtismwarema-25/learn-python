@@ -1,5 +1,6 @@
 """Validated API contracts for the Community domain."""
 
+import re
 from django.utils import timezone
 from urllib.parse import urlsplit
 
@@ -358,3 +359,44 @@ class ChannelMessageCreateSerializer(serializers.Serializer):
                 'A resource may be referenced only once per message.'
             )
         return value
+
+
+_SEARCH_TERM_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+class SpaceSearchQuerySerializer(serializers.Serializer):
+    q = serializers.CharField(max_length=200)
+    content_type = serializers.ChoiceField(
+        choices=(
+            ('all', 'All'),
+            ('discussions', 'Discussions'),
+            ('resources', 'Resources')
+        ),
+        default='all'
+    )
+    channel_id = serializers.UUIDField(required=False)
+    start_date = serializers.DateField(required=False)
+    end_date = serializers.DateField(required=False)
+    page = serializers.IntegerField(min_value=1, default=1)
+    page_size = serializers.IntegerField(
+        min_value=1,
+        max_value=50,
+        default=20
+    )
+
+    def validate_q(self, value):
+        normalized = ' '.join(value.split())
+        if not _SEARCH_TERM_PATTERN.search(normalized):
+            raise serializers.ValidationError(
+                'Enter at least one letter or number to search.'
+            )
+        return normalized
+
+    def validate(self, attrs):
+        start_date = attrs.get('start_date')
+        end_date = attrs.get('end_date')
+        if start_date is not None and end_date is not None and start_date > end_date:
+            raise serializers.ValidationError({
+                'end_date': 'End date must not be before the start date.'
+            })
+        return attrs
