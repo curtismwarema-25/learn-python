@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import UserAuth from './components/UserAuth'
 import Chat from './components/Chat'
 import SpaceDetail from './components/SpaceDetail'
+import SpaceResources from './components/SpaceResources'
 import Spaces, { SpaceInviteJoin } from './components/Spaces'
 
 function RequireAuth ({ children }: { children: ReactNode }) {
@@ -19,6 +20,14 @@ export default function App () {
     <Routes>
       <Route path="/auth" element={<UserAuth />} />
       <Route path="/spaces" element={<Spaces />} />
+      <Route
+        path="/spaces/:spaceId/resources/:resourceId"
+        element={<SpaceResources />}
+      />
+      <Route
+        path="/spaces/:spaceId/resources"
+        element={<SpaceResources />}
+      />
       <Route
         path="/spaces/:spaceId/channels/:channelId"
         element={<SpaceDetail />}

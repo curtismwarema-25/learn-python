@@ -7,25 +7,36 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from chat.models import ChatSession, ChatSessionMessage
-from chat.services import create_chat_message
 
 from rest_framework import permissions, status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Channel, Space, SpaceJoinRequest, SpaceMembership
+from .models import (
+    Channel,
+    Resource,
+    ResourceReference,
+    Space,
+    SpaceJoinRequest,
+    SpaceMembership
+)
 from .permissions import (
     ADMINISTRATOR,
     MANAGER_ROLES,
     MEMBER,
+    MODERATOR,
     OWNER,
     get_space_role
 )
 from .serializers import (
     ChannelCreateSerializer,
+    ChannelMessageCreateSerializer,
     ChannelSerializer,
     ChannelUpdateSerializer,
+    ResourceCreateSerializer,
+    ResourceSerializer,
+    ResourceUpdateSerializer,
     SpaceCreateSerializer,
     SpaceDetailSerializer,
     SpaceJoinRequestSerializer,
@@ -38,8 +49,11 @@ from .serializers import (
     SpaceUpdateSerializer
 )
 from .services import (
+    channel_message_to_json,
     create_channel,
-    ensure_default_channel
+    create_channel_message,
+    ensure_default_channel,
+    resource_reference_to_json
 )
 
 
@@ -213,6 +227,19 @@ class SpaceDetailView(APIView):
                     },
                     status=status.HTTP_409_CONFLICT
                 )
+            if Resource.objects.filter(
+                space=space,
+                status__in=(Resource.Status.ACTIVE, Resource.Status.ARCHIVED)
+            ).exists():
+                return Response(
+                    {
+                        'detail': (
+                            'A Space with active or archived resources cannot '
+                            'be deleted. Delete its resources first.'
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT
+                )
             channel_sessions.delete()
             space.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -352,9 +379,17 @@ class SpaceChannelMessagesView(APIView):
             kwargs['channel_id']
         )
         messages = [
-            message.to_json()
+            channel_message_to_json(message)
             for message in channel.conversation.messages
             .select_related('user')
+            .prefetch_related(
+                Prefetch(
+                    'resource_references',
+                    queryset=ResourceReference.objects
+                    .select_related('resource')
+                    .order_by('create_date', 'id')
+                )
+            )
             .order_by('create_date', 'id')
         ]
         return Response({
@@ -375,34 +410,197 @@ class SpaceChannelMessagesView(APIView):
                 status=status.HTTP_409_CONFLICT
             )
 
-        message = request.data.get('message')
-        if not isinstance(message, str) or not message.strip():
-            return Response(
-                {'message': ['A non-empty message is required.']},
-                status=status.HTTP_400_BAD_REQUEST
+        serializer = ChannelMessageCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        message = serializer.validated_data['message']
+        resource_ids = serializer.validated_data.get('resource_ids', [])
+        resources_by_id = {
+            resource.pk: resource
+            for resource in Resource.objects.filter(
+                space=channel.space,
+                status=Resource.Status.ACTIVE,
+                pk__in=resource_ids
             )
-        if len(message) > 2000:
-            return Response(
-                {
-                    'message': [
-                        'Ensure this field has no more than 2000 characters.'
-                    ]
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        }
+        if len(resources_by_id) != len(resource_ids):
+            raise ValidationError({
+                'resource_ids': [
+                    'Choose active resources from this Space.'
+                ]
+            })
+        resources = [resources_by_id[resource_id] for resource_id in resource_ids]
 
-        chat_message = create_chat_message(
-            channel.conversation,
+        chat_message = create_channel_message(
+            channel,
             request.user,
             message,
-            publish_to_rabbitmq=False
+            resources
         )
-        return Response({
-            'status': 'SUCCESS',
-            'id': chat_message.id,
-            'message': message,
-            'user': {'username': request.user.username}
-        }, status=status.HTTP_201_CREATED)
+        message_data = chat_message.to_json()
+        message_data['resources'] = [
+            resource_reference_to_json(resource)
+            for resource in resources
+        ]
+        return Response(message_data, status=status.HTTP_201_CREATED)
+
+
+class SpaceResourcesView(APIView):
+    """List or create Space-scoped link resources."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request, *args, **kwargs):
+        space = _space_or_404(kwargs['space_id'])
+        role = _require_space_member(space, request.user)
+        resources = Resource.objects.filter(space=space)
+        requested_status = request.query_params.get('status', 'active')
+        if requested_status == Resource.Status.ACTIVE:
+            resources = resources.filter(status=Resource.Status.ACTIVE)
+        elif requested_status == Resource.Status.ARCHIVED:
+            resources = resources.filter(status=Resource.Status.ARCHIVED)
+            if role not in {*MANAGER_ROLES, MODERATOR}:
+                resources = resources.filter(created_by=request.user)
+        else:
+            raise ValidationError({
+                'status': ['Choose either "active" or "archived".']
+            })
+
+        query = request.query_params.get('q', '').strip()
+        if query:
+            resources = resources.filter(
+                Q(title__icontains=query)
+                | Q(description__icontains=query)
+                | Q(external_url__icontains=query)
+            )
+        resources = resources.select_related('space', 'created_by').order_by(
+            '-create_date',
+            'id'
+        )
+        return Response(
+            ResourceSerializer(
+                resources,
+                many=True,
+                context={'request': request, 'space_role': role}
+            ).data
+        )
+
+    def post(self, request, *args, **kwargs):
+        space = _space_or_404(kwargs['space_id'])
+        role = _require_space_member(space, request.user)
+        serializer = ResourceCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        resource = serializer.save(space=space, created_by=request.user)
+        return Response(
+            ResourceSerializer(
+                resource,
+                context={'request': request, 'space_role': role}
+            ).data,
+            status=status.HTTP_201_CREATED
+        )
+
+
+class SpaceResourceDetailView(APIView):
+    """Read or manage one Resource within its owning Space."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get_resource(self, request, space_id, resource_id):
+        space = _space_or_404(space_id)
+        _require_space_member(space, request.user)
+        return get_object_or_404(
+            Resource.objects.select_related('space', 'created_by'),
+            pk=resource_id,
+            space=space
+        )
+
+    def get(self, request, *args, **kwargs):
+        resource = self.get_resource(
+            request,
+            kwargs['space_id'],
+            kwargs['resource_id']
+        )
+        role = get_space_role(resource.space, request.user)
+        return Response(
+            ResourceSerializer(
+                resource,
+                context={'request': request, 'space_role': role}
+            ).data
+        )
+
+    def patch(self, request, *args, **kwargs):
+        resource = self.get_resource(
+            request,
+            kwargs['space_id'],
+            kwargs['resource_id']
+        )
+        if resource.status == Resource.Status.DELETED:
+            raise NotFound('Resource has been deleted.')
+
+        serializer = ResourceUpdateSerializer(
+            resource,
+            data=request.data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        role = get_space_role(resource.space, request.user)
+        is_manager = role in MANAGER_ROLES
+        is_creator = resource.created_by_id == request.user.pk
+
+        if any(key in values for key in ('title', 'description', 'external_url')):
+            if not (is_manager or is_creator):
+                raise PermissionDenied(
+                    'Only the resource creator or a Space manager can edit it.'
+                )
+        next_status = values.get('status')
+        if next_status == Resource.Status.ARCHIVED and not (
+            is_manager or is_creator or role == MODERATOR
+        ):
+            raise PermissionDenied(
+                'Only the creator, a moderator, or a Space manager can archive it.'
+            )
+        if next_status == Resource.Status.ACTIVE and not (
+            is_manager or is_creator
+        ):
+            raise PermissionDenied(
+                'Only the creator or a Space manager can restore it.'
+            )
+
+        resource = serializer.save()
+        return Response(
+            ResourceSerializer(
+                resource,
+                context={'request': request, 'space_role': role}
+            ).data
+        )
+
+    def delete(self, request, *args, **kwargs):
+        resource = self.get_resource(
+            request,
+            kwargs['space_id'],
+            kwargs['resource_id']
+        )
+        if get_space_role(resource.space, request.user) not in MANAGER_ROLES:
+            raise PermissionDenied(
+                'Only the Space owner or an administrator can delete a resource.'
+            )
+        if resource.status != Resource.Status.DELETED:
+            resource.status = Resource.Status.DELETED
+            resource.deleted_at = timezone.now()
+            resource.title = ''
+            resource.description = ''
+            resource.external_url = ''
+            resource.created_by = None
+            resource.save(update_fields=(
+                'status',
+                'deleted_at',
+                'title',
+                'description',
+                'external_url',
+                'created_by',
+                'update_date'
+            ))
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class SpaceMembersView(APIView):

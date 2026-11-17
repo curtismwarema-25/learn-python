@@ -4,6 +4,33 @@ export interface ChatMessage {
   id: number
   user: { username: string }
   message: string
+  resources?: SpaceResourceReference[]
+}
+
+export type SpaceResourceStatus = 'active' | 'archived' | 'deleted'
+
+export interface SpaceResourceReference {
+  id: string
+  title: string
+  status: SpaceResourceStatus
+}
+
+export interface SpaceResource {
+  id: string
+  type: 'link'
+  title: string
+  description: string
+  url: string | null
+  sourceDomain: string | null
+  creatorUsername: string | null
+  status: SpaceResourceStatus
+  deletedAt: string | null
+  createDate: string
+  updateDate: string
+  canEdit: boolean
+  canArchive: boolean
+  canRestore: boolean
+  canDelete: boolean
 }
 
 export interface SpaceChannel {
@@ -132,11 +159,88 @@ export function parseChatMessage (value: unknown): ChatMessage {
     throw new Error('The server returned an invalid chat message.')
   }
 
+  let resources: SpaceResourceReference[] = []
+  if (value.resources !== undefined) {
+    if (!Array.isArray(value.resources)) {
+      throw new Error('The server returned invalid message resources.')
+    }
+    resources = value.resources.map(parseSpaceResourceReference)
+  }
+
   return {
     id: value.id,
     user: { username: value.user.username },
-    message: value.message
+    message: value.message,
+    resources
   }
+}
+
+function isSpaceResourceStatus (value: unknown): value is SpaceResourceStatus {
+  return value === 'active' || value === 'archived' || value === 'deleted'
+}
+
+export function parseSpaceResourceReference (value: unknown): SpaceResourceReference {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.title !== 'string' ||
+    !isSpaceResourceStatus(value.status)
+  ) {
+    throw new Error('The server returned an invalid resource reference.')
+  }
+  return {
+    id: value.id,
+    title: value.title,
+    status: value.status
+  }
+}
+
+export function parseSpaceResource (value: unknown): SpaceResource {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    value.type !== 'link' ||
+    typeof value.title !== 'string' ||
+    typeof value.description !== 'string' ||
+    !(value.url === null || typeof value.url === 'string') ||
+    !(value.source_domain === null || typeof value.source_domain === 'string') ||
+    !(value.creator_username === null || typeof value.creator_username === 'string') ||
+    !isSpaceResourceStatus(value.status) ||
+    !(value.deleted_at === null || typeof value.deleted_at === 'string') ||
+    typeof value.create_date !== 'string' ||
+    typeof value.update_date !== 'string' ||
+    typeof value.can_edit !== 'boolean' ||
+    typeof value.can_archive !== 'boolean' ||
+    typeof value.can_restore !== 'boolean' ||
+    typeof value.can_delete !== 'boolean'
+  ) {
+    throw new Error('The server returned an invalid Space resource.')
+  }
+
+  return {
+    id: value.id,
+    type: 'link',
+    title: value.title,
+    description: value.description,
+    url: value.url,
+    sourceDomain: value.source_domain,
+    creatorUsername: value.creator_username,
+    status: value.status,
+    deletedAt: value.deleted_at,
+    createDate: value.create_date,
+    updateDate: value.update_date,
+    canEdit: value.can_edit,
+    canArchive: value.can_archive,
+    canRestore: value.can_restore,
+    canDelete: value.can_delete
+  }
+}
+
+export function parseSpaceResources (value: unknown): SpaceResource[] {
+  if (!Array.isArray(value)) {
+    throw new Error('The server returned an invalid Space resource list.')
+  }
+  return value.map(parseSpaceResource)
 }
 
 export function parseChatMessages (value: unknown): ChatMessage[] {

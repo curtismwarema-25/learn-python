@@ -11,6 +11,16 @@ urlpatterns = [
     path('spaces/', views.SpaceDirectoryView.as_view(), name='directory'),
     path('spaces/mine/', views.MySpacesView.as_view(), name='mine'),
     path(
+        'spaces/<uuid:space_id>/resources/',
+        views.SpaceResourcesView.as_view(),
+        name='resources'
+    ),
+    path(
+        'spaces/<uuid:space_id>/resources/<uuid:resource_id>/',
+        views.SpaceResourceDetailView.as_view(),
+        name='resource-detail'
+    ),
+    path(
         'spaces/invites/join/',
         views.SpaceInviteJoinView.as_view(),
         name='invite-join'

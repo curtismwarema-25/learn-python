@@ -94,6 +94,72 @@ class Channel(models.Model):
         ]
 
 
+class Resource(models.Model):
+    """A Space-scoped item preserved independently from its discussion."""
+
+    class Type(models.TextChoices):
+        LINK = 'link', 'Link'
+
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        ARCHIVED = 'archived', 'Archived'
+        DELETED = 'deleted', 'Deleted'
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    space = models.ForeignKey(
+        Space,
+        related_name='resources',
+        on_delete=models.CASCADE
+    )
+    type = models.CharField(
+        max_length=16,
+        choices=Type.choices,
+        default=Type.LINK
+    )
+    title = models.CharField(max_length=160, blank=True)
+    description = models.TextField(blank=True)
+    external_url = models.URLField(max_length=2048, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        related_name='created_space_resources',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.ACTIVE
+    )
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    create_date = models.DateTimeField(auto_now_add=True)
+    update_date = models.DateTimeField(auto_now=True)
+
+
+class ResourceReference(models.Model):
+    """A structured reference from a channel message to its Space resource."""
+
+    message = models.ForeignKey(
+        'chat.ChatSessionMessage',
+        related_name='resource_references',
+        on_delete=models.CASCADE
+    )
+    resource = models.ForeignKey(
+        Resource,
+        related_name='message_references',
+        on_delete=models.PROTECT
+    )
+    create_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('message', 'resource'),
+                name='uniq_resource_reference_per_message'
+            )
+        ]
+
+
 class SpaceMembership(models.Model):
     """An active non-owner member of a Space."""
 

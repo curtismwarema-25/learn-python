@@ -562,10 +562,13 @@ implementation inventory, verification commands, and open operational risks.
   retrieval, and message creation. Message access checks ownership or
   membership. Channel-backed conversations are excluded from direct-chat
   APIs.
-- The `community` app defines Spaces, membership, join requests, and Channels.
-  New Spaces receive a `general` channel; existing Spaces are backfilled by a
-  data migration. Channel messages reuse chat message storage and are
-  authorized by current Space membership.
+- The `community` app defines Spaces, membership, join requests, Channels,
+  external-link Resources, and structured ResourceReferences from channel
+  messages. New Spaces receive a `general` channel; existing Spaces are
+  backfilled by a data migration. Channel messages reuse chat message storage
+  and are authorized by current Space membership. Resource links have
+  metadata search and role-aware lifecycle controls; file uploads, private
+  storage, text extraction, and RAG are not implemented.
 - The ASGI application routes HTTP to Django and WebSockets through separate
   direct-chat and Space-channel consumers. Both authenticate a DRF token from
   the first frame and recheck authorization before frames and message events.
@@ -626,10 +629,12 @@ Potential logical domains, to introduce only when needed:
 - AI integrations, usage controls, and evaluation.
 
 These are design boundaries, not instructions to create every app or model
-now. The current Community foundation uses `Space`, `SpaceMembership`, and
-`SpaceJoinRequest`. Other possible concepts include `KnowledgeResource`,
-`LearningHub`, `LearningPathway`, `Lesson`, `Activity`, `LearnerProgress`,
-`Workflow`, and `Project`; these remain proposals, not existing Django models.
+now. The current Community foundation uses `Space`, `SpaceMembership`,
+`SpaceJoinRequest`, `Channel`, `Resource`, and `ResourceReference`. RAG
+indexing, embeddings, and retrieval models remain proposals. Other possible
+concepts include `LearningHub`, `LearningPathway`, `Lesson`, `Activity`,
+`LearnerProgress`, `Workflow`, and `Project`; these remain proposals, not
+existing Django models.
 
 Keep API responsibilities aligned with existing conventions. Future endpoint
 families for communities, knowledge, learning, progress, and projects are

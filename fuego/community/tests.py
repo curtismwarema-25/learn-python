@@ -16,7 +16,14 @@ from chat.models import ChatSession, ChatSessionMessage
 from chat.websocket import _is_chat_member
 from fuego.asgi import application
 
-from .models import Channel, Space, SpaceJoinRequest, SpaceMembership
+from .models import (
+    Channel,
+    Resource,
+    ResourceReference,
+    Space,
+    SpaceJoinRequest,
+    SpaceMembership
+)
 from .permissions import ADMINISTRATOR, MEMBER, MODERATOR, OWNER
 
 
@@ -669,6 +676,279 @@ class ChannelAPITests(TestCase):
             pk=self.channel.conversation_id
         ).exists())
         self.assertFalse(Channel.objects.filter(pk=self.channel.pk).exists())
+
+
+class ResourceAPITests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username='resource_owner',
+            password='TestResourceOwner123!'
+        )
+        self.admin = User.objects.create_user(
+            username='resource_admin',
+            password='TestResourceAdmin123!'
+        )
+        self.moderator = User.objects.create_user(
+            username='resource_moderator',
+            password='TestResourceModerator123!'
+        )
+        self.member = User.objects.create_user(
+            username='resource_member',
+            password='TestResourceMember123!'
+        )
+        self.other_member = User.objects.create_user(
+            username='resource_other',
+            password='TestResourceOther123!'
+        )
+        self.outsider = User.objects.create_user(
+            username='resource_outsider',
+            password='TestResourceOutside123!'
+        )
+        self.space = Space.objects.create(
+            owner=self.owner,
+            name='Resource Testing',
+            purpose='Test shared Space resources.'
+        )
+        for user, role in (
+            (self.admin, ADMINISTRATOR),
+            (self.moderator, MODERATOR),
+            (self.member, MEMBER),
+            (self.other_member, MEMBER)
+        ):
+            SpaceMembership.objects.create(
+                space=self.space,
+                user=user,
+                role=role
+            )
+        self.client = APIClient()
+        self.resources_url = '/api/spaces/%s/resources/' % self.space.id
+        self.channel = create_test_channel(self.space, self.owner)
+        self.messages_url = (
+            '/api/spaces/%s/channels/%s/messages/'
+            % (self.space.id, self.channel.id)
+        )
+
+    def create_resource(self, created_by=None, **values):
+        return Resource.objects.create(
+            space=self.space,
+            created_by=created_by or self.owner,
+            title=values.get('title', 'Django documentation'),
+            description=values.get('description', 'A useful reference.'),
+            external_url=values.get(
+                'external_url',
+                'https://docs.djangoproject.com/'
+            )
+        )
+
+    def test_member_can_add_search_and_read_links_but_other_spaces_are_hidden(self):
+        self.client.force_authenticate(user=self.member)
+        created = self.client.post(
+            self.resources_url,
+            {
+                'title': 'Django docs',
+                'description': 'Official framework reference.',
+                'url': 'https://docs.djangoproject.com/en/6.1/'
+            },
+            format='json'
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data['source_domain'], 'docs.djangoproject.com')
+        self.assertEqual(created.data['creator_username'], self.member.username)
+        self.assertEqual(
+            self.client.get(self.resources_url + '?q=framework').data[0]['id'],
+            created.data['id']
+        )
+        self.assertEqual(
+            self.client.get(
+                self.resources_url + '?q=not-found'
+            ).data,
+            []
+        )
+
+        other_space = Space.objects.create(
+            owner=self.outsider,
+            name='Other Space',
+            purpose='A separate community.'
+        )
+        other_resource = Resource.objects.create(
+            space=other_space,
+            created_by=self.outsider,
+            title='Private link',
+            external_url='https://example.com/'
+        )
+        self.client.force_authenticate(user=self.outsider)
+        self.assertEqual(
+            self.client.get(self.resources_url).status_code,
+            404
+        )
+        self.assertEqual(
+            self.client.get(
+                self.resources_url + '%s/' % other_resource.id
+            ).status_code,
+            404
+        )
+
+    def test_links_reject_unsafe_schemes_and_embedded_credentials(self):
+        self.client.force_authenticate(user=self.member)
+        for url in (
+            'javascript:alert(1)',
+            'https://user:password@example.com/private'
+        ):
+            with self.subTest(url=url):
+                response = self.client.post(
+                    self.resources_url,
+                    {'title': 'Unsafe link', 'url': url},
+                    format='json'
+                )
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(Resource.objects.count(), 0)
+
+    def test_creator_and_moderator_archive_but_only_managers_delete(self):
+        resource = self.create_resource(created_by=self.member)
+        detail_url = self.resources_url + '%s/' % resource.id
+
+        self.client.force_authenticate(user=self.member)
+        edited = self.client.patch(
+            detail_url,
+            {'title': 'Updated by creator'},
+            format='json'
+        )
+        self.assertEqual(edited.status_code, 200)
+
+        self.client.force_authenticate(user=self.moderator)
+        archived = self.client.patch(
+            detail_url,
+            {'status': Resource.Status.ARCHIVED},
+            format='json'
+        )
+        self.assertEqual(archived.status_code, 200)
+        denied_edit = self.client.patch(
+            detail_url,
+            {'title': 'Moderator cannot edit'},
+            format='json'
+        )
+        denied_delete = self.client.delete(detail_url)
+        self.assertEqual(denied_edit.status_code, 403)
+        self.assertEqual(denied_delete.status_code, 403)
+
+        self.client.force_authenticate(user=self.other_member)
+        self.assertEqual(
+            self.client.get(self.resources_url + '?status=archived').data,
+            []
+        )
+
+        self.client.force_authenticate(user=self.admin)
+        restored = self.client.patch(
+            detail_url,
+            {'status': Resource.Status.ACTIVE},
+            format='json'
+        )
+        self.assertEqual(restored.status_code, 200)
+        removed = self.client.delete(detail_url)
+        self.assertEqual(removed.status_code, 204)
+        resource.refresh_from_db()
+        self.assertEqual(resource.status, Resource.Status.DELETED)
+        self.assertEqual(resource.external_url, '')
+        self.assertEqual(resource.title, '')
+
+    def test_removed_member_loses_resource_access(self):
+        resource = self.create_resource(created_by=self.member)
+        self.space.memberships.filter(user=self.member).delete()
+        self.client.force_authenticate(user=self.member)
+
+        self.assertEqual(self.client.get(self.resources_url).status_code, 404)
+        self.assertEqual(
+            self.client.get(
+                self.resources_url + '%s/' % resource.id
+            ).status_code,
+            404
+        )
+
+    def test_channel_reference_is_space_scoped_and_survives_resource_deletion(self):
+        resource = self.create_resource()
+        self.client.force_authenticate(user=self.member)
+
+        with patch('chat.services.notify') as notify:
+            with self.captureOnCommitCallbacks(execute=True):
+                posted = self.client.post(
+                    self.messages_url,
+                    {
+                        'message': 'Keep this reference.',
+                        'resource_ids': [str(resource.id)]
+                    },
+                    format='json'
+                )
+
+        self.assertEqual(posted.status_code, 201)
+        self.assertEqual(
+            posted.data['resources'],
+            [{
+                'id': str(resource.id),
+                'title': resource.title,
+                'status': Resource.Status.ACTIVE
+            }]
+        )
+        event_message = (
+            notify.call_args.kwargs['extra_data']['context']['message']
+        )
+        self.assertEqual(event_message['resources'], posted.data['resources'])
+        self.assertTrue(
+            ResourceReference.objects.filter(
+                message_id=posted.data['id'],
+                resource=resource
+            ).exists()
+        )
+
+        other_space = Space.objects.create(
+            owner=self.outsider,
+            name='Elsewhere',
+            purpose='Not this Space.'
+        )
+        other_resource = Resource.objects.create(
+            space=other_space,
+            created_by=self.outsider,
+            title='Other Space resource',
+            external_url='https://example.org/'
+        )
+        wrong_space_reference = self.client.post(
+            self.messages_url,
+            {
+                'message': 'This must not be accepted.',
+                'resource_ids': [str(other_resource.id)]
+            },
+            format='json'
+        )
+        self.assertEqual(wrong_space_reference.status_code, 400)
+
+        self.client.force_authenticate(user=self.owner)
+        self.assertEqual(
+            self.client.delete(self.resources_url + '%s/' % resource.id).status_code,
+            204
+        )
+        self.client.force_authenticate(user=self.member)
+        history = self.client.get(self.messages_url)
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(
+            history.data['messages'][0]['resources'],
+            [{
+                'id': str(resource.id),
+                'title': 'Resource removed',
+                'status': Resource.Status.DELETED
+            }]
+        )
+
+    def test_space_deletion_requires_resources_to_be_removed_first(self):
+        resource = self.create_resource()
+        self.client.force_authenticate(user=self.owner)
+
+        blocked = self.client.delete('/api/spaces/%s/' % self.space.id)
+        self.assertEqual(blocked.status_code, 409)
+
+        self.client.delete(self.resources_url + '%s/' % resource.id)
+        deleted = self.client.delete('/api/spaces/%s/' % self.space.id)
+        self.assertEqual(deleted.status_code, 204)
+        self.assertFalse(Space.objects.filter(pk=self.space.pk).exists())
 
 
 class ChannelWebSocketTests(TransactionTestCase):

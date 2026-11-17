@@ -8,9 +8,10 @@ import {
   parseChatMessage,
   parseSpaceChannel,
   parseSpaceChannelMessages,
-  parseSpaceChannels
+  parseSpaceChannels,
+  parseSpaceResources
 } from '../api'
-import type { ChatMessage, SpaceChannel } from '../api'
+import type { ChatMessage, SpaceChannel, SpaceResource } from '../api'
 import ChatMessageView from './ChatMessage'
 import MessageComposer from './MessageComposer'
 
@@ -21,6 +22,8 @@ interface SpaceChannelsProps {
 }
 
 type RealtimeStatus = 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'unavailable'
+
+const MAX_RESOURCE_REFERENCES = 20
 
 function isAuthenticationAcknowledgement (value: unknown): boolean {
   return typeof value === 'object' &&
@@ -54,6 +57,10 @@ function ChannelConversation ({
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
+  const [availableResources, setAvailableResources] = useState<SpaceResource[]>([])
+  const [selectedResourceIds, setSelectedResourceIds] = useState<string[]>([])
+  const [resourceLoading, setResourceLoading] = useState(true)
+  const [resourceError, setResourceError] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [historyError, setHistoryError] = useState('')
@@ -255,6 +262,44 @@ function ChannelConversation ({
     }
   }, [spaceId, channel.id, token])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    setResourceLoading(true)
+    setResourceError('')
+    setSelectedResourceIds([])
+    setAvailableResources([])
+
+    async function loadResources () {
+      if (!token) {
+        setResourceLoading(false)
+        return
+      }
+      try {
+        const resources = parseSpaceResources(await apiRequest(
+          `/api/spaces/${encodeURIComponent(spaceId)}/resources/`,
+          {
+            headers: { Authorization: `Token ${token}` },
+            signal: controller.signal
+          }
+        ))
+        if (active) setAvailableResources(resources)
+      } catch (error: unknown) {
+        if (active && !controller.signal.aborted) {
+          setResourceError(getErrorMessage(error))
+        }
+      } finally {
+        if (active) setResourceLoading(false)
+      }
+    }
+
+    void loadResources()
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [spaceId, token])
+
   async function sendMessage (event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const message = draft.trim()
@@ -271,7 +316,10 @@ function ChannelConversation ({
             Authorization: `Token ${token}`,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ message })
+          body: JSON.stringify({
+            message,
+            resource_ids: selectedResourceIds
+          })
         }
       ))
       setMessages(current => (
@@ -280,6 +328,7 @@ function ChannelConversation ({
           : [...current, result]
       ))
       setDraft('')
+      setSelectedResourceIds([])
     } catch (error: unknown) {
       setSendError(getErrorMessage(error))
     } finally {
@@ -347,18 +396,73 @@ function ChannelConversation ({
                 key={message.id}
                 message={message}
                 isOwnMessage={message.user.username === username}
+                spaceId={spaceId}
               />
             ))}
       </div>
       {sendError && <p className="space-error" role="alert">{sendError}</p>}
       {channel.archived
         ? <p className="space-channel-readonly">This channel is archived and read-only.</p>
-        : <MessageComposer
-            value={draft}
-            sending={sending}
-            onChange={setDraft}
-            onSubmit={sendMessage}
-          />}
+        : (
+          <>
+            <details className="resource-reference-picker">
+              <summary>Reference existing Space resources</summary>
+              {resourceLoading && <p role="status">Loading resources…</p>}
+              {resourceError && <p className="space-error" role="alert">{resourceError}</p>}
+              {!resourceLoading && !resourceError && availableResources.length === 0 && (
+                <p>
+                  No active links are available.{' '}
+                  <Link to={`/spaces/${encodeURIComponent(spaceId)}/resources`}>
+                    Open the resource library
+                  </Link>
+                </p>
+              )}
+              {!resourceLoading && !resourceError && availableResources.length > 0 && (
+                <label>
+                  Choose resources to reference
+                  <select
+                    multiple
+                    onChange={event => {
+                      setSelectedResourceIds(
+                        Array.from(
+                          event.currentTarget.selectedOptions,
+                          option => option.value
+                        ).slice(0, MAX_RESOURCE_REFERENCES)
+                      )
+                    }}
+                    size={Math.min(availableResources.length, 5)}
+                    value={selectedResourceIds}
+                  >
+                    {availableResources.map(resource => (
+                      <option
+                        key={resource.id}
+                        value={resource.id}
+                        disabled={
+                          selectedResourceIds.length >= MAX_RESOURCE_REFERENCES &&
+                          !selectedResourceIds.includes(resource.id)
+                        }
+                      >
+                        {resource.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {availableResources.length > 0 && (
+                <p aria-live="polite">
+                  {selectedResourceIds.length} of {MAX_RESOURCE_REFERENCES} resources selected.
+                  You can reference up to {MAX_RESOURCE_REFERENCES} per message.
+                </p>
+              )}
+            </details>
+            <MessageComposer
+              value={draft}
+              sending={sending}
+              onChange={setDraft}
+              onSubmit={sendMessage}
+            />
+          </>
+        )}
     </div>
   )
 }

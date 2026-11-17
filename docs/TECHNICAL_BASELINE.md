@@ -186,20 +186,27 @@ pending on the tracked local database; apply them before using this code with
 that database.
 
 The `community` app defines `Space`, `SpaceMembership`, `SpaceJoinRequest`,
-and `Channel`. A Channel has a one-to-one `ChatSession` for message storage and
-notifications, and a per-Space unique slug. The Space owner is stored directly
-on `Space`; other active members have one of the Administrator, Moderator, or
-Member roles. Spaces are private by default, with optional metadata-only
-discovery. Space content, channel messages, member rosters, requests, and
-invitation tokens are protected by server-side checks.
+`Channel`, `Resource`, and `ResourceReference`. A Channel has a one-to-one
+`ChatSession` for message storage and notifications, and a per-Space unique
+slug. A Resource is currently an external link with title and description;
+uploaded files and private media storage are not implemented. A
+ResourceReference links a channel message to a Resource. The Space owner is
+stored directly on `Space`; other active members have one of the
+Administrator, Moderator, or Member roles. Spaces are private by default,
+with optional metadata-only discovery. Space content, channel messages,
+resources, member rosters, requests, and invitation tokens are protected by
+server-side checks.
 
 New Spaces receive a default `general` channel. The Channels data migration
 backfills existing Spaces. Channel history is preserved by archiving; channel
-and Space deletion are blocked when relevant message history exists. The
-Community migrations `0001` and `0002` are pending on the tracked local
-database, as are chat migrations `0002` and `0003`. The `0002_channel` data
-migration is intentionally irreversible to avoid orphaning channel
-conversations if rolled back.
+and Space deletion are blocked when relevant message history exists. Space
+links support metadata search, creator/moderator/manager lifecycle controls,
+and deletion tombstones that preserve existing channel references. Link
+references are created atomically with channel messages and are not exposed
+through direct-chat APIs. Community migrations `0001`, `0002`, and `0003` are
+pending on the tracked local database, as are chat migrations `0002` and
+`0003`. The `0002_channel` data migration is intentionally irreversible to
+avoid orphaning channel conversations if rolled back.
 
 Relevant implementation:
 [`fuego/chat/models.py`](../fuego/chat/models.py),
@@ -210,16 +217,19 @@ Community implementation:
 [`fuego/community/views.py`](../fuego/community/views.py),
 [`fuego/community/consumers.py`](../fuego/community/consumers.py),
 [`fuego/community/migrations/0001_initial.py`](../fuego/community/migrations/0001_initial.py),
-[`fuego/community/migrations/0002_channel.py`](../fuego/community/migrations/0002_channel.py).
+[`fuego/community/migrations/0002_channel.py`](../fuego/community/migrations/0002_channel.py),
+[`fuego/community/migrations/0003_resource_resourcereference.py`](../fuego/community/migrations/0003_resource_resourcereference.py).
 
 ### Frontend
 
 The app defines `/auth`, `/`, `/chats/:uri`, `/invites/:inviteToken`,
-`/spaces`, `/spaces/:spaceId`,
+`/spaces`, `/spaces/:spaceId`, `/spaces/:spaceId/resources`,
+`/spaces/:spaceId/resources/:resourceId`,
 `/spaces/:spaceId/channels/:channelId`, and
 `/spaces/invites/:inviteToken` routes. It supports registration/sign-in, direct
 chat, a Space directory and creation, join requests, membership and channel
-management, invite joining, channel messages, and WebSocket updates. The API
+management, invite joining, channel messages, link-resource management,
+resource references in channel messages, and WebSocket updates. The API
 helper validates response shapes before components use them.
 
 The frontend assumes the Django server is available on port `8000`; that
@@ -230,8 +240,10 @@ exhaustion, and message-history synchronization after reconnection.
 
 ### Not implemented
 
-- Content moderation/reporting, private/restricted channels, and separate
-  structured discussion or resource models.
+- Uploaded files/private media storage, content moderation/reporting,
+  private/restricted channels, and separate structured discussion models.
+- Text extraction from linked resources, source-eligibility controls, and
+  semantic/vector search. The link library's metadata search is not RAG.
 - A searchable knowledge base or reusable discussion content.
 - Learning hubs, pathways, lessons, activities, or progress tracking.
 - AI provider integrations or workflow-learning features.
@@ -279,12 +291,12 @@ Commands were run on **2026-11-17** in the local environment.
 |---|---|
 | `python manage.py check` | **Passed:** no system-check issues. |
 | `python manage.py makemigrations --check --dry-run` | **Passed:** no model changes detected that require a migration. |
-| `python manage.py test chat community` | **Passed:** 56 backend tests, including channel API permissions, direct-chat isolation, optional bridge exclusion, membership revocation, and WebSocket delivery. |
+| `python manage.py test chat community` | **Passed:** 62 backend tests, including resource role/visibility rules, tombstones, channel references, direct-chat isolation, and WebSocket delivery. |
 | Frontend `npm run typecheck` | **Passed.** |
-| Frontend `npm test` | **Passed:** 12 tests in 3 test files, including channel history, message sending/deduplication, and archived-channel read-only behavior. |
+| Frontend `npm test` | **Passed:** 13 tests, including channel history, message sending/deduplication, archived-channel behavior, and resource workflows. |
 | Frontend `npm run build` | **Passed:** TypeScript check and Vite production build. |
-| `scripts/validate-fuego.ps1 -Scope all` | **Passed:** frontend tests/build, Django checks, migration consistency, 56 backend tests, and whitespace check. |
-| Browser/device accessibility review | **Not performed:** automated tests do not verify rendered behavior across devices or full WCAG conformance. |
+| `scripts/validate-fuego.ps1 -Scope all` | **Passed:** frontend tests (13), TypeScript/production build, Django system checks, migration consistency, backend tests (62), and Git whitespace check. |
+| Browser/device accessibility review | **Partial:** the resource library was visually inspected with fixture data at desktop and mobile widths. Full 320px, keyboard, screen-reader, reduced-motion, and WCAG conformance reviews remain outstanding. |
 
 Run backend checks from the repository root with an explicit app label:
 
@@ -310,10 +322,11 @@ Pop-Location
 
 Backend tests cover registration/token login, ownership and membership
 permissions, invite joining, message access, database uniqueness, direct-chat
-isolation, Space channel permissions, and WebSocket access/delivery. The
-RabbitMQ publisher test mocks the connection; it does not validate a live
-RabbitMQ/uWSGI deployment. Frontend tests cover authentication,
-chat/reconnect, and Space channel scenarios.
+isolation, Space channel and Resource permissions, resource tombstones and
+references, and WebSocket access/delivery. The RabbitMQ publisher test mocks
+the connection; it does not validate a live RabbitMQ/uWSGI deployment.
+Frontend tests cover authentication, chat/reconnect, Spaces, link-resource
+management, and channel message references.
 
 These automated checks do not establish that the full stack has been manually
 walked through in a browser, that real-time delivery works across multiple
@@ -335,7 +348,7 @@ These are source-level findings and mitigations, not a formal security audit.
 | High | SQLite is the configured database and the database file is tracked. | **Verified.** Row contents were not inspected; only aggregate counts and duplicate checks were run. Decide how user data is protected, backed up, restored, and kept out of source control. |
 | Medium | CORS allows all origins; DRF also enables Basic and Session authentication. | **Verified.** Reassess allowed origins and authentication methods for the intended deployment and transport. |
 | Medium | No DRF throttling configuration was found. | **Verified in settings.** Define abuse/rate controls appropriate to public registration, login, and message endpoints. |
-| Medium | Chat history has no pagination; channel history also reuses the unpaginated message store. | **Verified in source.** Chat migrations `0002`/`0003` and Community migrations `0001`/`0002` are pending on the tracked local database; apply them before using this database with the updated models. Review history volume before expansion. |
+| Medium | Chat history has no pagination; channel history also reuses the unpaginated message store. | **Verified in source.** Chat migrations `0002`/`0003` and Community migrations `0001`/`0002`/`0003` are pending on the tracked local database; apply them before using this database with the updated models. Review history volume before expansion. |
 | Medium | The RabbitMQ/uWSGI bridge depends on separately provisioned services and is outside the standard local setup. | **Verified in source and setup docs; not live-tested.** Treat as experimental until deployment and failure behavior are exercised. |
 | Low | Tracked files include Python bytecode caches and pre-access-control source snapshots. | **Verified in the tracked-file inventory.** Decide on repository hygiene separately; ensure snapshot files are not mistaken for active code. |
 

@@ -366,6 +366,17 @@ export default function SpaceDetail () {
               {space.description && <p className="space-description">{space.description}</p>}
             </header>
 
+            {(space.membershipStatus === 'owner' || space.membershipStatus === 'member') && (
+              <p className="space-resource-entry">
+                <Link
+                  className="button button-secondary"
+                  to={`/spaces/${encodeURIComponent(space.id)}/resources`}
+                >
+                  Open resource library
+                </Link>
+              </p>
+            )}
+
             {space.membershipStatus === 'none' && space.visibility === 'discoverable' && (
               <section className="space-access-section" aria-labelledby="space-access-heading">
                 <h2 id="space-access-heading">Join this Space</h2>

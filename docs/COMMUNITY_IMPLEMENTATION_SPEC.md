@@ -1,18 +1,19 @@
 # Fuego Community Implementation Specification
 
-**Status:** Approved Space and Channels slices implemented; migrations pending on the tracked local database  
+**Status:** Spaces, Channels, and the link-resource foundation are implemented; migrations are pending on the tracked local database. File uploads remain deferred.
 **Product authority:** [Fuego Master](FUEGO_MASTER.md), especially §§5–7, 13–17, 21  
 **Technical evidence:** [Technical Baseline](TECHNICAL_BASELINE.md) and current source  
-**Scope:** Spaces and shared channels are implemented. Structured discussions,
-resources, search, notifications, and AI remain later milestones.
+**Scope:** Spaces, shared channels, Space link resources, metadata search, and
+structured channel references are implemented. File uploads, structured
+discussions, semantic search, notifications, and AI remain later milestones.
 
 ## 1. Current-state assessment
 
 The verified application is a Django 6.1 / Django REST Framework backend with
 `chat` and `community` apps, Django Channels WebSockets, SQLite, and a React +
-TypeScript frontend. The `community` app contains the Space, membership,
-request, and Channel models and APIs. Separate Discussion and Resource models
-are not implemented.
+TypeScript frontend. The `community` app contains Space, membership, request,
+Channel, Resource, and ResourceReference models and APIs. Separate Discussion
+models and uploaded-file storage are not implemented.
 
 Existing chat capabilities that must remain intact include authenticated chat
 creation, owner-managed members and invites, message history and sending, and
@@ -41,7 +42,7 @@ was found. Do not treat the roadmap as proof that a feature exists.
 | Channel management | Every new Space receives a `general` channel. Owner/admin can create, edit, archive, and delete empty channels. Archived channels retain history and are read-only. |
 | Invitations | Owner/admin only; authenticated joining; reusable for seven days; revocable and rotatable. An invitation grants the Member role, never an administrative role. |
 | Discussion model | Persistent channel message streams reuse the existing chat message infrastructure. Separate titled Discussion entities are deferred until knowledge workflows are validated. |
-| Product boundary | Spaces and channels are the approved Community slices. Do not add a feed, resources, search, notifications, or AI as placeholders. |
+| Product boundary | Spaces, channels, link resources, metadata search, and structured channel references are implemented. Do not add placeholder destinations or imply that file uploads or AI retrieval exist. |
 
 ### Role and permission matrix
 
@@ -57,12 +58,20 @@ was found. Do not treat the roadmap as proof that a feature exists.
 | Delete the Space | Yes | No | No | No |
 | Create, edit, archive, or delete an empty channel | Yes | Yes | No | No |
 | Read and send channel messages | Yes | Yes | Yes | Yes |
+| Create a Space link resource | Yes | Yes | Yes | Yes |
+| Edit or archive own resource | Yes | Yes | Yes | Yes |
+| Edit any resource (not only own) | Yes | Yes | No | No |
+| Restore own resource | Yes | Yes | Yes | Yes |
+| Restore any resource (not only own) | Yes | Yes | No | No |
+| Archive any resource (not only own) | Yes | Yes | Yes | No |
+| Permanently remove resource content (retain tombstone) | Yes | Yes | No | No |
 | Moderate channel content and reports (future) | Yes | Yes | Yes | No |
 
-Reports and channel-content moderation are not implemented. The owner cannot
-leave while still owner; ownership transfer is required first. Any member may
-leave. Public directory responses do not reveal membership rosters, invite
-tokens, or member counts.
+Reports and channel-content moderation are not implemented. Resource
+moderation is limited to the archive permission above. The owner cannot leave
+while still owner; ownership transfer is required first. Any member may leave.
+Public directory responses do not reveal membership rosters, invite tokens,
+or member counts.
 
 ## 3. Product specification and user journeys
 
@@ -88,6 +97,18 @@ tokens, or member counts.
   Keep channel management to the owner and administrators.
 - Archive channels to preserve history while preventing new messages. Permit
   hard deletion only when a channel has no messages.
+- Let active Space members add and find external link resources. Search only
+  the resource title, description, and URL; do not fetch previews or introduce
+  tags, folders, or a separate search service.
+- Let creators edit, archive, and restore their own resources; moderators may
+  archive any resource; owners/admins may manage any resource and remove its
+  content.
+- Preserve deleted-resource identity as a minimal tombstone so existing
+  channel references remain understandable. A Space with active or archived
+  resources cannot be deleted until those resources are removed.
+- Let members reference existing resources from channel messages through a
+  separate relation. Do not duplicate links as message attachments or expose
+  resource references through direct-chat APIs.
 
 ### Key journeys
 
@@ -105,11 +126,12 @@ tokens, or member counts.
 
 ### Explicitly deferred
 
-Structured discussions, moderation reports, resource uploads, search,
-notifications, learning content, and AI assistance remain deferred. Private
-direct messages are not Space knowledge and must not be indexed as shared
-Community content. The UI must not show nonfunctional destinations or sample
-content for deferred capabilities.
+Uploaded documents/images, structured discussions, moderation reports,
+notifications, learning content, and AI assistance remain deferred. Resource
+search is limited to metadata and is not semantic retrieval. Private direct
+messages are not Space knowledge and must not be indexed as shared Community
+content. The UI must not show nonfunctional destinations or sample content
+for deferred capabilities.
 
 ## 4. Architecture assessment
 
@@ -129,6 +151,13 @@ Keep the Django modular monolith and the current chat contract. The dedicated
   creator, archive timestamp, and per-Space unique slug. The conversation
   reuses existing chat messages and notifications; its `ChatSession.owner` is
   not an authorization grant.
+- `Resource`: a UUID-identified Space link with title, description, creator,
+  active/archived/deleted lifecycle, URL, and timestamps. Deleted resources
+  clear their descriptive content and URL while retaining a minimal
+  Space-scoped tombstone.
+- `ResourceReference`: a unique message-to-resource relation. The channel API
+  verifies that both objects belong to the same Space and that newly
+  referenced resources are active.
 
 Use database uniqueness for membership and request identity. Use transactions
 for Space and default-channel creation, invitation rotation, request approval,
@@ -145,8 +174,15 @@ membership before inbound frames and outbound message events. No
 
 Channel deletion returns a conflict if messages exist. Space deletion returns
 a conflict if any channel history exists; empty channel conversations are
-deleted with the Space. Ownership transfer updates the owner of linked
+deleted with the Space. Space deletion also returns a conflict while active
+or archived resources remain. Ownership transfer updates the owner of linked
 conversations without changing the Space-membership authorization model.
+
+Resource list/detail/create/update/archive/restore/delete operations are
+scoped to the URL Space and require current membership. Link URLs accept only
+HTTP/HTTPS without embedded credentials; Fuego never fetches the destination.
+All URL-bearing output is returned only to an active member. Metadata search
+uses the application database, with no external search engine.
 
 The invite is a bearer credential: use a cryptographically unpredictable
 token distinct from the Space ID, require authentication to redeem it, keep it
@@ -184,7 +220,9 @@ server-side. Public reads return only discoverable metadata.
 | `GET /api/spaces/{id}/channels/` | Active Space member lists channels, including archived channels. |
 | `POST /api/spaces/{id}/channels/` | Owner/admin creates a channel. |
 | `GET/PATCH/DELETE /api/spaces/{id}/channels/{channel_id}/` | Active member reads channel details; owner/admin edits, archives, restores, or deletes an empty channel. |
-| `GET/POST /api/spaces/{id}/channels/{channel_id}/messages/` | Active Space member reads history or sends a message; archived channels are read-only. |
+| `GET/POST /api/spaces/{id}/channels/{channel_id}/messages/` | Active Space member reads history or sends a message; POST accepts up to 20 optional `resource_ids`, each of which must identify an active Resource in the same Space. Archived channels are read-only. |
+| `GET/POST /api/spaces/{id}/resources/` | Active member lists/searches Space links or creates a link. Archived resources are available through the status filter to their creator and authorized moderators/managers. |
+| `GET/PATCH/DELETE /api/spaces/{id}/resources/{resource_id}/` | Active member reads a Space-scoped resource; PATCH updates metadata or lifecycle status according to creator/moderator/manager permissions. DELETE is owner/admin-only, clears resource content, and retains a tombstone. |
 | `WS /ws/spaces/{id}/channels/{channel_id}/` | First-frame token authentication; active Space membership is checked on connection and before delivery. |
 
 Use serializers for new input and output contracts, validate field lengths and
@@ -202,6 +240,11 @@ Spaces, and keep public and member payloads separate.
   `/spaces/{id}/channels/{channel_id}`. Reuse the chat message and composer
   components; provide owner/admin create, edit, archive, restore, and empty
   channel deletion controls.
+- Add `/spaces/{id}/resources` and `/spaces/{id}/resources/{resource_id}` for
+  member-only link discovery, search, creation, metadata editing, archive,
+  restore, deletion, and tombstone display.
+- Allow the channel composer to select existing Space links; render references
+  as links to the original Resource. Direct messages remain unchanged.
 - Add one "Spaces" destination to the existing shell. Preserve Home, direct
   chat, invite, sign-in, and message behavior.
 - Follow `.agents/skills/fuego-design/SKILL.md` and the relevant
@@ -220,12 +263,16 @@ Spaces, and keep public and member payloads separate.
 2. **Channels and participation (implemented):** default `general` channel,
    existing chat message infrastructure, Space-aware REST and WebSocket
    authorization, channel lifecycle, and responsive navigation.
-3. **Knowledge preservation:** validate resource/discussion lifecycle,
-   attribution, correction, search, and notification policies before models
-   or indexing.
-4. **Community intelligence:** only after content permissions and data
-   boundaries are stable, evaluate contextual summaries and retrieval. No
-   generic chatbot or autonomous execution infrastructure.
+3. **Link-resource foundation (implemented):** Space-scoped links, metadata
+   search, creator/moderator/manager lifecycle controls, deletion tombstones,
+   and structured channel references.
+4. **Secure file resources (deferred):** select a private storage provider,
+   deployment configuration, allowlist, size limit, content validation, and
+   protected download path before adding uploads. Current Django settings have
+   no media storage or private download service.
+5. **Knowledge retrieval (future):** update the approved RAG architecture only
+   after supported content extraction, opt-in/eligibility, and a production
+   data plan are reviewed. Private direct messages remain excluded.
 
 ## 8. Testing and acceptance strategy
 
@@ -242,13 +289,12 @@ Spaces, and keep public and member payloads separate.
   the tracked database during development validation.
 - Frontend tests: public directory/detail, auth redirect/return, create,
   request/cancel/approve, invite join/expiry, role controls, and failures.
-- Full validation: `scripts/validate-fuego.ps1 -Scope all` passed with 56
-  backend tests and 12 frontend tests, plus type checking, production build,
-  Django system checks, migration consistency, and whitespace validation.
-- Browser/accessibility review: desktop, tablet, mobile, 320px width, no
-  horizontal overflow, keyboard focus/order, semantic announcements, and
-  reduced-motion behavior remains outstanding. Automated checks do not prove
-  full WCAG conformance.
+- Current validation: `scripts/validate-fuego.ps1 -Scope all` passed with 62
+  backend tests, 13 frontend tests, frontend type checking/build, Django
+  system checks, migration consistency, and Git whitespace checks.
+- Browser review: the resource library was inspected with a local browser
+  fixture at desktop and mobile widths. Full 320px, keyboard, screen-reader,
+  reduced-motion, and WCAG conformance reviews remain outstanding.
 
 ## 9. Security, privacy, and remaining risks
 
