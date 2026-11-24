@@ -22,6 +22,7 @@ export default function AppShell ({
 }: AppShellProps) {
   const location = useLocation()
   const isSpaces = location.pathname.startsWith('/spaces')
+  const isLearning = location.pathname.startsWith('/learning')
 
   return (
     <div className="app-shell">
@@ -33,9 +34,9 @@ export default function AppShell ({
 
         <nav className="primary-nav" aria-label="Workspace">
           <Link
-            className={`nav-item ${conversationUri || isSpaces ? '' : 'is-active'}`}
+            className={`nav-item ${conversationUri || isSpaces || isLearning ? '' : 'is-active'}`}
             to="/"
-            aria-current={conversationUri || isSpaces ? undefined : 'page'}
+            aria-current={conversationUri || isSpaces || isLearning ? undefined : 'page'}
           >
             <span className="nav-indicator" aria-hidden="true" />
             Home
@@ -47,6 +48,14 @@ export default function AppShell ({
           >
             <span className="nav-indicator" aria-hidden="true" />
             Spaces
+          </Link>
+          <Link
+            className={`nav-item ${isLearning ? 'is-active' : ''}`}
+            to="/learning"
+            aria-current={isLearning ? 'page' : undefined}
+          >
+            <span className="nav-indicator" aria-hidden="true" />
+            Learning
           </Link>
           {conversationUri && (
             <Link
@@ -101,7 +110,7 @@ export default function AppShell ({
       <div className="app-main">
         <header className="app-topbar">
           <span className="topbar-label">
-            {isSpaces ? 'SPACES' : conversationUri ? 'CONVERSATION' : 'YOUR SPACE'}
+            {isSpaces ? 'SPACES' : isLearning ? 'LEARNING' : conversationUri ? 'CONVERSATION' : 'YOUR SPACE'}
           </span>
           {username && <span className="topbar-user">{username}</span>}
         </header>

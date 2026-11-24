@@ -128,3 +128,122 @@ placeholder functionality is presented. Remaining follow-up includes
 production security, privacy, backup, and deployment requirements. The
 optional uWSGI bridge excludes channels but still lacks per-event direct-chat
 authorization revalidation; production TLS/WSS behavior has not been verified.
+
+## Product completion audit refresh — 2026-11-24
+
+This section reflects the current workspace after the knowledge lifecycle,
+indexing, embedding foundation, and first learning MVP work. It supersedes the
+older capability claims above where they conflict with current source.
+
+| Product area | Classification | Current evidence and gap |
+| --- | --- | --- |
+| Direct chat and real-time messaging | IMPLEMENTED | Authenticated chat creation, invites, history, message sending, WebSocket delivery, access checks, and regression tests are connected. Presence, reactions, threading, and richer notification UX remain missing. |
+| Spaces and channels | IMPLEMENTED | Space membership, roles, invitations, channel management, resources, search, message editing/deletion, and live updates are connected. Moderation/reporting remains missing. |
+| Knowledge preservation | IMPLEMENTED | Explicit preservation, immutable versions, corrections, source revisions, soft deletion, withdrawal, source-deletion state, history, and permission-aware search are connected. |
+| Knowledge indexing and embeddings | PARTIAL | Database chunks, lifecycle invalidation, deterministic local embeddings, provider contracts, vector candidates, durable job state, and Celery task entry points exist. External provider adapters, production broker/worker configuration, and user-facing semantic search remain deferred. |
+| Learning pathways | IMPLEMENTED (MVP) | Authenticated users can discover and enroll in published pathways, read units/lessons, complete short-response activities, and retain private progress. Creator/staff authoring, draft/published/archived lifecycle, publication validation, lesson discussion links, and member question posting are now connected. Content versioning, richer checks, projects, and deletion workflows remain missing. |
+| Practical AI and workflows | MISSING | No external AI provider, workflow editor, guided practical workspace, approval flow, or outcome comparison exists. |
+| Creation and business workflows | MISSING | No social planning, marketing, sales, customer, project, or operations modules exist. |
+| Platform operations | PARTIAL | Authentication and server-side access boundaries are tested. Production settings, rate limiting, observability, deployment, backups, and migration operations remain incomplete. |
+
+### Milestone 2 — learning authoring, publication, and community integration
+
+The learning domain now has a minimal authoring surface for pathway creators and
+staff. Draft pathways can be edited with units, lessons, and short-response
+activities, then published only after structural validation. Published pathways
+can be archived without deleting enrollments or progress. The frontend exposes
+the management route separately from learner discovery and includes loading,
+error, and destructive-action confirmation states.
+
+Lessons can link to an existing Space channel or source message. Learner-facing
+links are filtered through current Space membership and deleted source messages
+are excluded. Enrolled members can post a question through the lesson view;
+the backend creates the ordinary channel message and records its lesson
+attribution. No ordinary conversation is implicitly converted into learning
+content.
+
+This is intentionally not a full CMS: published content has no immutable
+authoring revisions yet, lesson ordering is position-based, the first activity
+kind is `short_response`, and there is no author delete endpoint.
+
+### Major architectural inconsistencies
+
+- The repository now contains the beginning of a learning domain, but content
+  authoring and publication ownership are not yet modeled; seeded content is
+  deliberately a bootstrap mechanism, not a complete CMS.
+- Celery is configured for local eager execution and the embedding task is
+  durable in code, but no production broker, worker supervision, or retry
+  monitoring configuration is established.
+- The local database vector store is suitable for deterministic preparation,
+  not for production-scale semantic retrieval; it must remain behind the
+  vector-store contract.
+- Frontend navigation is functional but still primarily oriented around chat
+  and Spaces; learning discovery is now available but not yet a broader
+  workspace dashboard.
+
+### Milestone 3 — non-AI product completion audit
+
+The current repository verifies a usable vertical slice across chat, Spaces,
+channels, knowledge preservation/lifecycle, indexing preparation, and learning
+authoring/publication. Community moderation was the highest-value missing
+non-AI slice: members can now report a channel message, duplicate reports are
+prevented, and Space owners/administrators can review and resolve reports.
+The frontend exposes reporting from the existing channel message actions.
+
+The future AI requirements are documented separately in
+[`FUEGO_AI_REQUIREMENTS.md`](./FUEGO_AI_REQUIREMENTS.md). They define provider
+boundaries, permission-aware retrieval, attribution, human approval, privacy,
+cost controls, and staged delivery, but do not authorize AI implementation.
+
+| Capability | Classification | Current state | Value / next dependency | Priority |
+| --- | --- | --- | --- | --- |
+| Direct messaging and real-time communication | IMPLEMENTED | Authenticated chats, invites, history, REST/WebSocket access checks, and lifecycle tests exist. | Add richer presence, replies, and notification UX later. | Medium |
+| Spaces, Channels, membership, roles, invitations | IMPLEMENTED | Space administration, membership lifecycle, channels, resources, and permission-aware search are connected. | Production operations and moderation policy refinement remain. | High |
+| Message reporting and moderation review | IMPLEMENTED (MVP) | Members report messages; managers list and resolve reports with notes. | Add a dedicated moderation queue and automated notifications later. | High |
+| Knowledge preservation and lifecycle | IMPLEMENTED | Explicit preservation, versions, corrections, withdrawal, source deletion, and traceability exist. | Organisation, categorisation, and richer reuse remain. | High |
+| Learning authoring and publication | IMPLEMENTED (MVP) | Creator/staff authoring, publication validation, archive retention, progress, and discussion linkage exist. | Add immutable content revisions and richer activities. | High |
+| Profiles and notification preferences | MISSING | No complete user-facing profile/settings workflow is present. | Needed for identity, preferences, and safer notification delivery. | High |
+| Projects and task/work management | MISSING | No persistent projects, tasks, ownership, status, or collaboration workflow exists. | Main bridge from learning to practical creation; depends on product scope decisions. | Highest next product slice |
+| Content planning, campaigns, sales, operations | MISSING | No bounded workflow modules exist. | Should follow a validated project/task foundation; do not build all domains at once. | Later |
+| AI-powered features | DEFERRED | Requirements are documented only; existing embeddings remain indexing preparation. | Requires complete permissions, retrieval evaluation, privacy, and human-control gates. | Later |
+
+### Selected implementation and remaining backlog
+
+Message reporting was selected for this milestone because it directly improves
+community safety, completes a member-to-manager workflow, and uses existing
+Space authorization without introducing speculative infrastructure.
+
+Remaining non-AI backlog, in order:
+
+1. Build the project/task foundation: project workspace, owned tasks, status,
+   assignment, due dates, and a usable member collaboration flow.
+2. Add profiles and notification preferences, then connect moderation and
+   learning events to user-controlled notifications.
+3. Add immutable learning content revisions and safer published-content
+   replacement while preserving progress.
+4. Improve moderation with a Space-level queue, notifications, and documented
+   enforcement actions.
+5. Add categorisation and reuse workflows for resources and preserved
+   knowledge.
+6. Reassess the AI roadmap only after permission-aware retrieval and the above
+   product foundations are validated.
+
+### Prioritized implementation backlog
+
+1. Build the project/task foundation as the next non-AI product slice.
+2. Add profiles and notification preferences.
+3. Add immutable learning content revisions and safe published-content
+   replacement while preserving learner progress.
+4. Complete semantic retrieval behind the existing vector-store interface,
+   starting with a local similarity endpoint and explicit source citations.
+5. Define and implement one validated practical workflow lesson with a human
+   review/approval step; do not build autonomous agents.
+6. Harden production operations: secure settings, rate limits, structured
+   error handling, worker supervision, observability, backups, and migration
+   deployment procedures.
+7. Add richer learning activities and projects only after the first pathway is
+   used and validated.
+
+The next selected milestone is immutable learning content revisions or a local
+semantic retrieval endpoint with explicit citations. Both must preserve the
+current Space and knowledge access boundaries.

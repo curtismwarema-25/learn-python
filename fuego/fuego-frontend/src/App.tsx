@@ -6,6 +6,8 @@ import SpaceDetail from './components/SpaceDetail'
 import SpaceResources from './components/SpaceResources'
 import SpaceSearch from './components/SpaceSearch'
 import Spaces, { SpaceInviteJoin } from './components/Spaces'
+import Learning from './components/Learning'
+import LearningAuthoring from './components/LearningAuthoring'
 
 function RequireAuth ({ children }: { children: ReactNode }) {
   const location = useLocation()
@@ -21,6 +23,18 @@ export default function App () {
     <Routes>
       <Route path="/auth" element={<UserAuth />} />
       <Route path="/spaces" element={<Spaces />} />
+      <Route
+        path="/learning/manage"
+        element={<RequireAuth><LearningAuthoring /></RequireAuth>}
+      />
+      <Route
+        path="/learning/:slug"
+        element={<RequireAuth><Learning /></RequireAuth>}
+      />
+      <Route
+        path="/learning"
+        element={<RequireAuth><Learning /></RequireAuth>}
+      />
       <Route
         path="/spaces/:spaceId/search"
         element={<SpaceSearch />}

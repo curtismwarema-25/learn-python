@@ -5,7 +5,7 @@ from django.db import transaction
 from chat.models import ChatSession
 from chat.services import create_chat_message
 
-from .models import Channel, ResourceReference
+from .models import Channel, PreservedKnowledge, ResourceReference
 
 
 DEFAULT_CHANNEL_NAME = 'general'
@@ -30,6 +30,24 @@ def channel_message_to_json(message):
         resource_reference_to_json(reference.resource)
         for reference in message.resource_references.all()
     ]
+    knowledge = (
+        PreservedKnowledge.objects
+        .filter(
+            source_message=message,
+            status__in=(
+                PreservedKnowledge.Status.ACTIVE,
+                PreservedKnowledge.Status.NEEDS_REVIEW,
+                PreservedKnowledge.Status.SOURCE_DELETED
+            )
+        )
+        .only('id', 'status')
+        .first()
+    )
+    if knowledge is not None:
+        payload['knowledge'] = {
+            'id': knowledge.id,
+            'status': knowledge.status
+        }
     return payload
 
 

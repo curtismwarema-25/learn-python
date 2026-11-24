@@ -6,12 +6,19 @@ import {
   apiRequest,
   getErrorMessage,
   parseChatMessage,
+  parseSpaceKnowledgeHistory,
+  parseSpaceKnowledgeReference,
   parseSpaceChannel,
   parseSpaceChannelMessages,
   parseSpaceChannels,
   parseSpaceResources
 } from '../api'
-import type { ChatMessage, SpaceChannel, SpaceResource } from '../api'
+import type {
+  ChatMessage,
+  SpaceChannel,
+  SpaceKnowledgeHistory,
+  SpaceResource
+} from '../api'
 import ChatMessageView from './ChatMessage'
 import MessageComposer from './MessageComposer'
 
@@ -32,6 +39,11 @@ function isAuthenticationAcknowledgement (value: unknown): boolean {
     value.type === 'authenticated'
 }
 
+function isMessageLifecycleEvent (value: unknown, type: string): value is { type: string; id: number } {
+  return typeof value === 'object' && value !== null &&
+    'type' in value && value.type === type && 'id' in value && typeof value.id === 'number'
+}
+
 function mergeMessages (history: ChatMessage[], current: ChatMessage[]) {
   const messagesById = new Map<number, ChatMessage>()
   for (const message of [...history, ...current]) {
@@ -48,12 +60,14 @@ function ChannelConversation ({
   spaceId,
   channel,
   username,
-  token
+  token,
+  canManage
 }: {
   spaceId: string
   channel: SpaceChannel
   username: string | null
   token: string | null
+  canManage: boolean
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const initialMessageHash = useRef(window.location.hash)
@@ -64,6 +78,10 @@ function ChannelConversation ({
   const [resourceError, setResourceError] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [knowledgeBusyId, setKnowledgeBusyId] = useState<number | null>(null)
+  const [knowledgeHistories, setKnowledgeHistories] = useState<Record<number, SpaceKnowledgeHistory>>({})
+  const [knowledgeHistoryLoadingId, setKnowledgeHistoryLoadingId] = useState<number | null>(null)
+  const [messageBusyId, setMessageBusyId] = useState<number | null>(null)
   const [historyError, setHistoryError] = useState('')
   const [sendError, setSendError] = useState('')
   const [websocketError, setWebsocketError] = useState('')
@@ -84,6 +102,7 @@ function ChannelConversation ({
 
   useEffect(() => {
     setMessages([])
+    setKnowledgeHistories({})
     setHistoryError('')
     setSendError('')
     setWebsocketError('')
@@ -191,6 +210,17 @@ function ChannelConversation ({
               needsHistorySync = false
               void syncMessageHistory()
             }
+            return
+          }
+          if (isMessageLifecycleEvent(payload, 'message_deleted')) {
+            setMessages(current => current.filter(message => message.id !== payload.id))
+            return
+          }
+          if (isMessageLifecycleEvent(payload, 'message_updated')) {
+            const updated = parseChatMessage(payload)
+            setMessages(current => current.some(message => message.id === updated.id)
+              ? current.map(message => message.id === updated.id ? updated : message)
+              : [...current, updated])
             return
           }
           const message = parseChatMessage(payload)
@@ -348,6 +378,144 @@ function ChannelConversation ({
     }
   }
 
+  async function toggleKnowledge (message: ChatMessage) {
+    if (!token || knowledgeBusyId !== null) return
+    setKnowledgeBusyId(message.id)
+    try {
+      const path = message.knowledge
+        ? `/api/spaces/${encodeURIComponent(spaceId)}/knowledge/${message.knowledge.id}/withdraw/`
+        : `/api/spaces/${encodeURIComponent(spaceId)}/knowledge/`
+      const result = await apiRequest(path, {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${token}`,
+          ...(message.knowledge ? {} : { 'Content-Type': 'application/json' })
+        },
+        ...(message.knowledge ? {} : { body: JSON.stringify({ message_id: message.id }) })
+      })
+      const knowledge = message.knowledge
+        ? undefined
+        : parseSpaceKnowledgeReference(result)
+      setMessages(current => current.map(item => {
+        if (item.id !== message.id) return item
+        if (knowledge) return { ...item, knowledge }
+        const { knowledge: _removedKnowledge, ...withoutKnowledge } = item
+        return withoutKnowledge
+      }))
+    } catch (error: unknown) {
+      setSendError(`Knowledge could not be updated: ${getErrorMessage(error)}`)
+    } finally {
+      setKnowledgeBusyId(null)
+    }
+  }
+
+  async function editMessage (message: ChatMessage, content: string) {
+    if (!token || messageBusyId !== null) return
+    setMessageBusyId(message.id)
+    setSendError('')
+    try {
+      const updated = parseChatMessage(await apiRequest(
+        `/api/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channel.id)}/messages/${message.id}/`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: `Token ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: content })
+        }
+      ))
+      setMessages(current => current.map(item => item.id === updated.id ? updated : item))
+    } catch (error: unknown) {
+      setSendError(`Message could not be edited: ${getErrorMessage(error)}`)
+    } finally {
+      setMessageBusyId(null)
+    }
+  }
+
+  async function deleteMessage (message: ChatMessage) {
+    if (!token || messageBusyId !== null) return
+    setMessageBusyId(message.id)
+    setSendError('')
+    try {
+      await apiRequest(
+        `/api/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channel.id)}/messages/${message.id}/`,
+        { method: 'DELETE', headers: { Authorization: `Token ${token}` } }
+      )
+      setMessages(current => current.filter(item => item.id !== message.id))
+    } catch (error: unknown) {
+      setSendError(`Message could not be deleted: ${getErrorMessage(error)}`)
+    } finally {
+      setMessageBusyId(null)
+    }
+  }
+
+  async function reportMessage (message: ChatMessage, reason: string) {
+    if (!token || messageBusyId !== null) return
+    setMessageBusyId(message.id)
+    setSendError('')
+    try {
+      await apiRequest(
+        `/api/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channel.id)}/messages/${message.id}/reports/`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Token ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason })
+        }
+      )
+      setSendError('Report submitted to Space managers.')
+    } catch (error: unknown) {
+      setSendError(`Report could not be submitted: ${getErrorMessage(error)}`)
+    } finally {
+      setMessageBusyId(null)
+    }
+  }
+
+  async function viewKnowledgeHistory (message: ChatMessage) {
+    if (!token || !message.knowledge || knowledgeHistoryLoadingId !== null) return
+    setKnowledgeHistoryLoadingId(message.knowledge.id)
+    setSendError('')
+    try {
+      const history = parseSpaceKnowledgeHistory(await apiRequest(
+        `/api/spaces/${encodeURIComponent(spaceId)}/knowledge/${message.knowledge.id}/history/`,
+        { headers: { Authorization: `Token ${token}` } }
+      ))
+      setKnowledgeHistories(current => ({
+        ...current,
+        [message.knowledge!.id]: history
+      }))
+    } catch (error: unknown) {
+      setSendError(`Knowledge history could not be loaded: ${getErrorMessage(error)}`)
+    } finally {
+      setKnowledgeHistoryLoadingId(null)
+    }
+  }
+
+  async function submitKnowledgeCorrection (
+    message: ChatMessage,
+    content: string,
+    explanation: string
+  ) {
+    if (!token || !message.knowledge || knowledgeBusyId !== null) return
+    setKnowledgeBusyId(message.id)
+    setSendError('')
+    try {
+      await apiRequest(
+        `/api/spaces/${encodeURIComponent(spaceId)}/knowledge/${message.knowledge.id}/corrections/`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Token ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ content, explanation })
+        }
+      )
+      await viewKnowledgeHistory(message)
+    } catch (error: unknown) {
+      setSendError(`Knowledge correction could not be submitted: ${getErrorMessage(error)}`)
+    } finally {
+      setKnowledgeBusyId(null)
+    }
+  }
+
   return (
     <div className="space-channel-conversation">
       <header className="space-channel-header">
@@ -409,6 +577,30 @@ function ChannelConversation ({
                 message={message}
                 isOwnMessage={message.user.username === username}
                 spaceId={spaceId}
+                onToggleKnowledge={() => { void toggleKnowledge(message) }}
+                knowledgeBusy={knowledgeBusyId === message.id}
+                {...(
+                  message.knowledge && knowledgeHistories[message.knowledge.id]
+                    ? { knowledgeHistory: knowledgeHistories[message.knowledge.id] }
+                    : {}
+                )}
+                knowledgeHistoryLoading={message.knowledge
+                  ? knowledgeHistoryLoadingId === message.knowledge.id
+                  : false}
+                onViewKnowledgeHistory={() => { void viewKnowledgeHistory(message) }}
+                onSubmitKnowledgeCorrection={(content, explanation) => {
+                  void submitKnowledgeCorrection(message, content, explanation)
+                }}
+                messageBusy={messageBusyId === message.id}
+                {...(message.user.username === username || canManage
+                  ? {
+                      onEditMessage: (content: string) => { void editMessage(message, content) },
+                      onDeleteMessage: () => { void deleteMessage(message) }
+                    }
+                  : {})}
+                {...(message.user.username !== username
+                  ? { onReportMessage: (reason: string) => { void reportMessage(message, reason) } }
+                  : {})}
               />
             ))}
       </div>
@@ -665,6 +857,7 @@ export default function SpaceChannels ({
                     channel={activeChannel}
                     username={username}
                     token={token}
+                    canManage={canManage}
                   />
                   {canManage && (
                     <div className="space-channel-management">

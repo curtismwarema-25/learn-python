@@ -599,6 +599,83 @@ select:focus-visible {
   white-space: pre-wrap;
 }
 
+.message-knowledge-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.message-knowledge-actions .button {
+  min-height: 34px;
+}
+
+.message-knowledge-label {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.message-knowledge-history {
+  border-left: 1px solid var(--border);
+  margin-top: 10px;
+  padding-left: 10px;
+}
+
+.message-knowledge-history-heading {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  margin: 0 0 8px;
+}
+
+.message-knowledge-history ol {
+  display: grid;
+  gap: 9px;
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.message-knowledge-history li {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.message-knowledge-history li span {
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.message-knowledge-history li small,
+.message-knowledge-history li em {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.knowledge-correction-form {
+  display: grid;
+  gap: 9px;
+}
+
+.knowledge-correction-form label {
+  color: var(--text-secondary);
+  display: grid;
+  font-size: 11px;
+  gap: 5px;
+}
+
+.knowledge-correction-form textarea,
+.knowledge-correction-form input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 8px;
+}
+
 .message-composer {
   align-items: center;
   background: var(--surface);
@@ -1009,6 +1086,188 @@ select:focus-visible {
   background: #1b1110;
   border-left-color: var(--accent);
   color: #f2a08e;
+}
+
+.learning-page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2rem clamp(1rem, 4vw, 3rem) 4rem;
+}
+
+.learning-heading,
+.learning-lesson-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.learning-intro {
+  max-width: 42rem;
+  color: var(--text-secondary);
+}
+
+.learning-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.learning-card,
+.learning-lesson,
+.learning-overview {
+  display: block;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 1.25rem;
+  color: inherit;
+}
+
+.learning-card {
+  text-decoration: none;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.learning-card:hover,
+.learning-card:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.learning-card h2,
+.learning-unit h2,
+.learning-lesson h3 {
+  margin: .35rem 0 .75rem;
+}
+
+.learning-card-meta,
+.learning-lesson-heading > span,
+.learning-progress-label {
+  color: var(--text-secondary);
+  font-size: .8rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.learning-overview {
+  margin: 2rem 0;
+}
+
+.learning-progress {
+  height: .55rem;
+  margin-top: 1.25rem;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.learning-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.learning-progress-label {
+  margin: .5rem 0 1rem;
+}
+
+.learning-unit {
+  margin-top: 2.5rem;
+}
+
+.learning-lessons {
+  display: grid;
+  gap: 1rem;
+}
+
+.learning-lesson.is-complete {
+  border-color: var(--accent);
+}
+
+.learning-lesson form {
+  margin-top: 1.25rem;
+}
+
+.learning-lesson textarea {
+  width: 100%;
+  margin-top: .45rem;
+}
+
+.learning-author-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, 260px) 1fr;
+  gap: 1.25rem;
+  margin-top: 2rem;
+}
+
+.learning-author-list,
+.learning-author-editor,
+.learning-author-unit {
+  display: grid;
+  gap: 1rem;
+}
+
+.learning-author-list {
+  align-content: start;
+}
+
+.learning-author-item {
+  display: grid;
+  gap: .25rem;
+  width: 100%;
+  padding: .75rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.learning-author-item span {
+  color: var(--text-secondary);
+  font-size: .75rem;
+  text-transform: uppercase;
+}
+
+.learning-author-item.is-selected,
+.learning-author-item:hover {
+  border-color: var(--accent);
+}
+
+.learning-author-form {
+  display: grid;
+  gap: .65rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.learning-author-form input,
+.learning-author-form textarea {
+  width: 100%;
+}
+
+.learning-author-unit {
+  padding: 1rem;
+  border-left: 2px solid var(--accent);
+}
+
+.learning-author-unit ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .learning-heading,
+  .learning-lesson-heading {
+    flex-direction: column;
+  }
+
+  .learning-author-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .space-notice {

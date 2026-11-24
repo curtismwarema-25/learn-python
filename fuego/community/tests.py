@@ -18,6 +18,12 @@ from fuego.asgi import application
 
 from .models import (
     Channel,
+    KnowledgeIndexChunk,
+    KnowledgeChunkEmbedding,
+    KnowledgeIndexingJob,
+    KnowledgeVersion,
+    MessageReport,
+    PreservedKnowledge,
     Resource,
     ResourceReference,
     Space,
@@ -25,6 +31,12 @@ from .models import (
     SpaceMembership
 )
 from .permissions import ADMINISTRATOR, MEMBER, MODERATOR, OWNER
+from .indexing import chunk_content, index_knowledge
+from .embedding_pipeline import embed_indexing_job
+from .embeddings import EmbeddingProviderError, FakeEmbeddingProvider
+from .vector_store import get_vector_store
+from .tasks import embed_indexing_job_task
+from .services import ensure_default_channel
 
 
 User = get_user_model()
@@ -949,6 +961,501 @@ class ResourceAPITests(TestCase):
         deleted = self.client.delete('/api/spaces/%s/' % self.space.id)
         self.assertEqual(deleted.status_code, 204)
         self.assertFalse(Space.objects.filter(pk=self.space.pk).exists())
+
+
+class KnowledgePreservationAPITests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username='knowledge_owner',
+            password='TestKnowledgeOwner123!'
+        )
+        self.member = User.objects.create_user(
+            username='knowledge_member',
+            password='TestKnowledgeMember123!'
+        )
+        self.other_member = User.objects.create_user(
+            username='knowledge_other',
+            password='TestKnowledgeOther123!'
+        )
+        self.outsider = User.objects.create_user(
+            username='knowledge_outsider',
+            password='TestKnowledgeOutside123!'
+        )
+        self.space = Space.objects.create(
+            owner=self.owner,
+            name='Knowledge Space',
+            purpose='Preserve useful answers.'
+        )
+        for user in (self.member, self.other_member):
+            SpaceMembership.objects.create(
+                space=self.space,
+                user=user,
+                role=MEMBER
+            )
+        self.channel = create_test_channel(self.space, self.owner)
+        self.message = ChatSessionMessage.objects.create(
+            chat_session=self.channel.conversation,
+            user=self.member,
+            message='A reusable answer.'
+        )
+        self.knowledge_url = '/api/spaces/%s/knowledge/' % self.space.id
+        self.client = APIClient()
+
+    def test_member_can_preserve_and_retrieve_traceable_message(self):
+        self.client.force_authenticate(user=self.member)
+
+        preserved = self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+
+        self.assertEqual(preserved.status_code, 201)
+        self.assertEqual(preserved.data['source_message_id'], self.message.id)
+        self.assertEqual(preserved.data['source_message']['content'], 'A reusable answer.')
+        self.assertEqual(preserved.data['source_message']['author'], self.member.username)
+        self.assertEqual(preserved.data['source_message']['channel_id'], str(self.channel.id))
+        self.assertTrue(preserved.data['can_withdraw'])
+        self.assertEqual(preserved.data['current_version']['version_number'], 1)
+        self.assertEqual(preserved.data['current_version']['content'], 'A reusable answer.')
+        self.assertEqual(preserved.data['version_count'], 1)
+
+        self.message.message = 'The corrected reusable answer.'
+        self.message.save(update_fields=('message', 'update_date'))
+        listed = self.client.get(self.knowledge_url)
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.data), 1)
+        self.assertEqual(
+            listed.data[0]['source_message']['content'],
+            'The corrected reusable answer.'
+        )
+        self.assertEqual(
+            PreservedKnowledge.objects.get(source_message=self.message).status,
+            PreservedKnowledge.Status.ACTIVE
+        )
+
+    def test_preservation_creates_idempotent_index_and_member_scoped_chunks(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        knowledge_id = preserved.data['id']
+        job = KnowledgeIndexingJob.objects.get(knowledge_id=knowledge_id)
+        self.assertEqual(job.status, KnowledgeIndexingJob.Status.INDEXED)
+        self.assertEqual(job.attempt_count, 1)
+        self.assertEqual(job.chunks.count(), 1)
+        chunk = job.chunks.get()
+        self.assertEqual(chunk.version_id, preserved.data['current_version']['id'])
+        self.assertEqual(chunk.source_message_id, self.message.id)
+        self.assertEqual(chunk.source_author, self.member.username)
+        self.assertEqual(chunk.source_channel_id, self.channel.id)
+
+        index_knowledge(knowledge_id)
+        job.refresh_from_db()
+        self.assertEqual(job.attempt_count, 1)
+        self.assertEqual(job.chunks.count(), 1)
+
+        chunks = self.client.get(
+            self.knowledge_url + '%s/chunks/' % knowledge_id
+        )
+        self.assertEqual(chunks.status_code, 200)
+        self.assertEqual(len(chunks.data['chunks']), 1)
+        self.assertEqual(chunks.data['chunks'][0]['knowledge_id'], knowledge_id)
+
+        self.space.memberships.filter(user=self.member).delete()
+        self.assertEqual(
+            self.client.get(self.knowledge_url + '%s/chunks/' % knowledge_id).status_code,
+            404
+        )
+
+    def test_preservation_generates_deterministic_embedding_and_vector_candidates(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        job = KnowledgeIndexingJob.objects.get(knowledge_id=preserved.data['id'])
+        task_result = embed_indexing_job_task.delay(job.pk)
+        self.assertEqual(task_result.get()['status'], KnowledgeIndexingJob.EmbeddingStatus.COMPLETE)
+        job.refresh_from_db()
+        self.assertEqual(
+            job.embedding_status,
+            KnowledgeIndexingJob.EmbeddingStatus.COMPLETE,
+            job.embedding_error
+        )
+        embedding = KnowledgeChunkEmbedding.objects.get(chunk__job=job)
+        self.assertEqual(embedding.status, KnowledgeChunkEmbedding.Status.READY)
+        self.assertEqual(embedding.provider, 'fake')
+        self.assertEqual(embedding.model, 'fuego-fake-v1')
+        self.assertEqual(embedding.dimensions, 32)
+
+        provider = FakeEmbeddingProvider()
+        candidates = get_vector_store().search(
+            self.space,
+            provider.embed(self.message.message),
+            provider,
+            provider.model
+        )
+        self.assertEqual(candidates[0].chunk_id, embedding.chunk_id)
+        self.assertAlmostEqual(candidates[0].similarity, 1.0)
+
+    def test_provider_failure_is_recorded_and_recovery_is_idempotent(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        job = KnowledgeIndexingJob.objects.get(knowledge_id=preserved.data['id'])
+        embed_indexing_job(job.pk)
+        job.refresh_from_db()
+        job.embedding_status = KnowledgeIndexingJob.EmbeddingStatus.PENDING
+        job.save(update_fields=('embedding_status', 'update_date'))
+        provider = FakeEmbeddingProvider()
+        with patch('community.embedding_pipeline.get_embedding_provider', return_value=provider):
+            with patch.object(
+                provider,
+                'embed_batch',
+                side_effect=EmbeddingProviderError('provider unavailable')
+            ):
+                with self.assertRaises(EmbeddingProviderError):
+                    embed_indexing_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(
+            job.embedding_status,
+            KnowledgeIndexingJob.EmbeddingStatus.FAILED
+        )
+        self.assertIn('provider unavailable', job.embedding_error)
+        recovered = embed_indexing_job(job.pk)
+        self.assertEqual(
+            recovered.embedding_status,
+            KnowledgeIndexingJob.EmbeddingStatus.COMPLETE
+        )
+        self.assertEqual(
+            KnowledgeChunkEmbedding.objects.filter(chunk__job=job).count(),
+            1
+        )
+
+    def test_model_change_obsoletes_old_embedding_without_changing_knowledge(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        job = KnowledgeIndexingJob.objects.get(knowledge_id=preserved.data['id'])
+        embed_indexing_job(job.pk)
+        with patch('community.embedding_pipeline.get_embedding_provider') as get_provider:
+            provider = FakeEmbeddingProvider(model='fuego-fake-v2')
+            get_provider.return_value = provider
+            embed_indexing_job(job.pk)
+        self.assertEqual(
+            KnowledgeChunkEmbedding.objects.filter(
+                chunk__job=job,
+                model='fuego-fake-v1',
+                status=KnowledgeChunkEmbedding.Status.OBSOLETE
+            ).count(),
+            1
+        )
+        self.assertTrue(
+            KnowledgeChunkEmbedding.objects.filter(
+                chunk__job=job,
+                model='fuego-fake-v2',
+                status=KnowledgeChunkEmbedding.Status.READY
+            ).exists()
+        )
+        self.assertEqual(
+            KnowledgeVersion.objects.get(pk=preserved.data['current_version']['id']).content,
+            self.message.message
+        )
+
+    def test_correction_obsoletes_old_index_and_indexes_only_current_version(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        knowledge_id = preserved.data['id']
+        correction = self.client.post(
+            self.knowledge_url + '%s/corrections/' % knowledge_id,
+            {'content': 'A newer indexed answer.'},
+            format='json'
+        )
+        self.assertEqual(correction.status_code, 201)
+        jobs = KnowledgeIndexingJob.objects.filter(knowledge_id=knowledge_id).order_by('version_id')
+        self.assertEqual(jobs.count(), 2)
+        self.assertEqual(jobs[0].status, KnowledgeIndexingJob.Status.OBSOLETE)
+        self.assertEqual(jobs[1].status, KnowledgeIndexingJob.Status.INDEXED)
+        chunks = self.client.get(self.knowledge_url + '%s/chunks/' % knowledge_id)
+        self.assertEqual(chunks.data['chunks'][0]['version_id'], correction.data['current_version']['id'])
+
+    def test_index_failure_is_recorded_and_retry_recovers(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        knowledge_id = preserved.data['id']
+        job = KnowledgeIndexingJob.objects.get(knowledge_id=knowledge_id)
+        job.status = KnowledgeIndexingJob.Status.OBSOLETE
+        job.save(update_fields=('status', 'update_date'))
+        with patch(
+            'community.indexing.chunk_content',
+            side_effect=RuntimeError('simulated failure')
+        ):
+            failed = index_knowledge(knowledge_id)
+        self.assertEqual(failed.status, KnowledgeIndexingJob.Status.FAILED)
+        self.assertIn('simulated failure', failed.error_message)
+        recovered = index_knowledge(knowledge_id)
+        self.assertEqual(recovered.status, KnowledgeIndexingJob.Status.INDEXED)
+        self.assertEqual(recovered.attempt_count, 3)
+
+    def test_chunking_normalizes_text_and_uses_overlap(self):
+        chunks = chunk_content('  One\n two   three.  ')
+        self.assertEqual([chunk.content for chunk in chunks], ['One two three.'])
+        long_text = ' '.join('word%03d' % index for index in range(250))
+        chunks = chunk_content(long_text)
+        self.assertGreater(len(chunks), 1)
+        self.assertLessEqual(max(len(chunk.content) for chunk in chunks), 1000)
+        self.assertTrue(set(chunks[0].content.split()) & set(chunks[1].content.split()))
+
+    def test_corrections_are_authorized_transactional_and_immutable(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        knowledge_id = preserved.data['id']
+        detail_url = self.knowledge_url + '%s/' % knowledge_id
+        correction_url = detail_url + 'corrections/'
+        history_url = detail_url + 'history/'
+
+        self.message.message = 'A source edit that is not a curated correction.'
+        self.message.save(update_fields=('message', 'update_date'))
+        detail = self.client.get(detail_url)
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(
+            detail.data['source_message']['content'],
+            'A source edit that is not a curated correction.'
+        )
+        self.assertEqual(detail.data['current_version']['content'], 'A reusable answer.')
+
+        correction = self.client.post(
+            correction_url,
+            {
+                'content': 'The corrected reusable answer.',
+                'explanation': 'Clarified the example.'
+            },
+            format='json'
+        )
+        self.assertEqual(correction.status_code, 201)
+        self.assertEqual(correction.data['current_version']['version_number'], 2)
+        self.assertEqual(correction.data['current_version']['created_by_username'], self.member.username)
+        self.assertEqual(correction.data['version_count'], 2)
+
+        history = self.client.get(history_url)
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.data['current_version'], correction.data['current_version']['id'])
+        self.assertEqual(
+            [version['content'] for version in history.data['versions']],
+            ['The corrected reusable answer.', 'A reusable answer.']
+        )
+        self.assertEqual(history.data['versions'][0]['explanation'], 'Clarified the example.')
+        self.assertTrue(history.data['versions'][0]['is_current'])
+        self.assertFalse(history.data['versions'][1]['is_current'])
+
+        self.client.force_authenticate(user=self.other_member)
+        denied = self.client.post(
+            correction_url,
+            {'content': 'An unauthorized rewrite.'},
+            format='json'
+        )
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(KnowledgeVersion.objects.filter(knowledge_id=knowledge_id).count(), 2)
+
+        self.client.force_authenticate(user=self.member)
+        self.assertEqual(self.client.post(detail_url + 'withdraw/').status_code, 204)
+        withdrawn_correction = self.client.post(
+            correction_url,
+            {'content': 'This must not be accepted.'},
+            format='json'
+        )
+        self.assertEqual(withdrawn_correction.status_code, 400)
+
+    def test_preservation_rejects_direct_messages_and_other_spaces(self):
+        self.client.force_authenticate(user=self.member)
+        direct_chat = ChatSession.objects.create(owner=self.member)
+        direct_message = ChatSessionMessage.objects.create(
+            chat_session=direct_chat,
+            user=self.member,
+            message='Private message.'
+        )
+        self.assertEqual(
+            self.client.post(
+                self.knowledge_url,
+                {'message_id': direct_message.id},
+                format='json'
+            ).status_code,
+            404
+        )
+
+        other_space = Space.objects.create(
+            owner=self.outsider,
+            name='Other Knowledge Space',
+            purpose='Separate content.'
+        )
+        other_channel = create_test_channel(other_space, self.outsider)
+        other_message = ChatSessionMessage.objects.create(
+            chat_session=other_channel.conversation,
+            user=self.outsider,
+            message='Other Space answer.'
+        )
+        self.assertEqual(
+            self.client.post(
+                self.knowledge_url,
+                {'message_id': other_message.id},
+                format='json'
+            ).status_code,
+            404
+        )
+        self.client.force_authenticate(user=self.outsider)
+        self.assertEqual(self.client.get(self.knowledge_url).status_code, 404)
+
+    def test_preserver_can_withdraw_and_members_cannot_read_after_membership_loss(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        withdraw_url = self.knowledge_url + '%s/withdraw/' % preserved.data['id']
+
+        withdrawn = self.client.post(withdraw_url)
+        self.assertEqual(withdrawn.status_code, 204)
+        self.assertEqual(self.client.get(self.knowledge_url).data, [])
+
+        self.client.force_authenticate(user=self.other_member)
+        self.assertEqual(self.client.get(self.knowledge_url).data, [])
+        self.space.memberships.filter(user=self.other_member).delete()
+        self.assertEqual(self.client.get(self.knowledge_url).status_code, 404)
+
+    def test_space_deletion_is_blocked_until_preserved_knowledge_is_withdrawn(self):
+        self.client.force_authenticate(user=self.member)
+        self.client.post(
+            self.knowledge_url,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        self.client.force_authenticate(user=self.owner)
+        blocked = self.client.delete('/api/spaces/%s/' % self.space.id)
+        self.assertEqual(blocked.status_code, 409)
+
+
+class SourceMessageLifecycleAPITests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='lifecycle_owner', password='LifecycleOwner123!')
+        self.member = User.objects.create_user(username='lifecycle_member', password='LifecycleMember123!')
+        self.other = User.objects.create_user(username='lifecycle_other', password='LifecycleOther123!')
+        self.space = Space.objects.create(
+            owner=self.owner,
+            name='Lifecycle Space',
+            purpose='Test source lifecycle.'
+        )
+        SpaceMembership.objects.create(space=self.space, user=self.member, role=MEMBER)
+        SpaceMembership.objects.create(space=self.space, user=self.other, role=MEMBER)
+        self.channel = create_test_channel(self.space, self.owner)
+        self.message = ChatSessionMessage.objects.create(
+            chat_session=self.channel.conversation,
+            user=self.member,
+            message='Original source content.'
+        )
+        self.client = APIClient()
+        self.message_url = (
+            '/api/spaces/%s/channels/%s/messages/%s/'
+            % (self.space.id, self.channel.id, self.message.id)
+        )
+        self.messages_url = (
+            '/api/spaces/%s/channels/%s/messages/'
+            % (self.space.id, self.channel.id)
+        )
+
+    def test_author_edit_creates_source_revision_and_marks_knowledge_for_review(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            '/api/spaces/%s/knowledge/' % self.space.id,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        self.assertEqual(preserved.status_code, 201)
+
+        edited = self.client.patch(
+            self.message_url,
+            {'message': 'Edited source content.'},
+            format='json'
+        )
+        self.assertEqual(edited.status_code, 200)
+        self.assertEqual(edited.data['message'], 'Edited source content.')
+        revision = self.message.revisions.get()
+        self.assertEqual(revision.revision_number, 1)
+        self.assertEqual(revision.content, 'Original source content.')
+        self.assertEqual(revision.changed_by, self.member)
+        self.assertEqual(
+            PreservedKnowledge.objects.get(pk=preserved.data['id']).status,
+            PreservedKnowledge.Status.NEEDS_REVIEW
+        )
+        job = KnowledgeIndexingJob.objects.get(knowledge_id=preserved.data['id'])
+        self.assertEqual(job.status, KnowledgeIndexingJob.Status.OBSOLETE)
+        self.assertIsNotNone(job.chunks.get().invalidated_at)
+        self.assertEqual(
+            job.embedding_status,
+            KnowledgeIndexingJob.EmbeddingStatus.OBSOLETE
+        )
+
+        history = self.client.get(self.message_url + 'revisions/')
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.data['current']['content'], 'Edited source content.')
+        self.assertEqual(history.data['revisions'][0]['content'], 'Original source content.')
+
+    def test_only_author_or_manager_can_change_and_delete_source(self):
+        self.client.force_authenticate(user=self.other)
+        self.assertEqual(self.client.patch(self.message_url, {'message': 'Nope'}, format='json').status_code, 403)
+        self.assertEqual(self.client.delete(self.message_url).status_code, 403)
+
+        self.client.force_authenticate(user=self.owner)
+        deleted = self.client.delete(self.message_url)
+        self.assertEqual(deleted.status_code, 204)
+        self.assertIsNotNone(ChatSessionMessage.objects.get(pk=self.message.id).deleted_at)
+        self.assertEqual(self.client.get(self.messages_url).data['messages'], [])
+
+    def test_source_deletion_marks_active_knowledge_source_deleted_but_preserves_withdrawn(self):
+        self.client.force_authenticate(user=self.member)
+        preserved = self.client.post(
+            '/api/spaces/%s/knowledge/' % self.space.id,
+            {'message_id': self.message.id},
+            format='json'
+        )
+        self.assertEqual(preserved.status_code, 201)
+        self.client.force_authenticate(user=self.owner)
+        self.assertEqual(self.client.delete(self.message_url).status_code, 204)
+        self.assertEqual(
+            PreservedKnowledge.objects.get(pk=preserved.data['id']).status,
+            PreservedKnowledge.Status.SOURCE_DELETED
+        )
+        self.assertEqual(
+            KnowledgeIndexingJob.objects.get(knowledge_id=preserved.data['id']).status,
+            KnowledgeIndexingJob.Status.OBSOLETE
+        )
+        self.assertEqual(
+            KnowledgeIndexingJob.objects.get(knowledge_id=preserved.data['id']).embedding_status,
+            KnowledgeIndexingJob.EmbeddingStatus.OBSOLETE
+        )
 
 
 class ChannelWebSocketTests(TransactionTestCase):

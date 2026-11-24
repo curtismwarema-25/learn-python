@@ -360,6 +360,44 @@ describe('Space experience', () => {
         }
         return jsonResponse({ id: channelId, name: 'general', messages: [] })
       }
+      if (path.endsWith(`/api/spaces/${spaceId}/knowledge/`)) {
+        return jsonResponse({ id: 11, status: 'active' }, 201)
+      }
+      if (path.endsWith(`/api/spaces/${spaceId}/knowledge/11/withdraw/`)) {
+        return noContentResponse()
+      }
+      if (path.endsWith(`/api/spaces/${spaceId}/knowledge/11/history/`)) {
+        return jsonResponse({
+          knowledge_id: 11,
+          status: 'active',
+          current_version: 2,
+          versions: [
+            {
+              id: 2,
+              version_number: 2,
+              content: 'A corrected message.',
+              explanation: 'Clarified the example.',
+              source_message_id: 9,
+              created_by_username: 'space_member',
+              create_date: '2026-11-17T13:00:00Z',
+              is_current: true
+            },
+            {
+              id: 1,
+              version_number: 1,
+              content: 'A message for the Space.',
+              explanation: '',
+              source_message_id: 9,
+              created_by_username: 'space_member',
+              create_date: '2026-11-17T12:00:00Z',
+              is_current: false
+            }
+          ]
+        })
+      }
+      if (path.endsWith(`/api/spaces/${spaceId}/knowledge/11/corrections/`)) {
+        return jsonResponse({ id: 11, status: 'active' }, 201)
+      }
       throw new Error(`Unexpected request: ${path}`)
     })
     const sockets = stubWebSockets()
@@ -431,6 +469,36 @@ describe('Space experience', () => {
       message: 'A message for the Space.',
       resource_ids: [resourceId]
     })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preserve knowledge' }))
+    expect(await screen.findByText('PRESERVED KNOWLEDGE')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Withdraw knowledge' })).toBeInTheDocument()
+    const preserveCall = fetchMock.mock.calls.find(call =>
+      call[1]?.method === 'POST' &&
+      String(call[0]).endsWith(`/api/spaces/${spaceId}/knowledge/`)
+    )
+    expect(JSON.parse(String(preserveCall?.[1]?.body))).toEqual({ message_id: 9 })
+
+    fireEvent.click(screen.getByRole('button', { name: 'View history' }))
+    expect(await screen.findByText('Current version V2')).toBeInTheDocument()
+    expect(screen.getByText('Clarified the example.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Submit correction' }))
+    fireEvent.change(screen.getByLabelText('Corrected content'), {
+      target: { value: 'A newly corrected message.' }
+    })
+    fireEvent.change(screen.getByLabelText('Explanation (optional)'), {
+      target: { value: 'Added missing context.' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Submit correction' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(call =>
+      call[1]?.method === 'POST' &&
+      String(call[0]).endsWith(`/api/spaces/${spaceId}/knowledge/11/corrections/`)
+    )).toBe(true))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw knowledge' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Preserve knowledge' })).toBeInTheDocument()
+    })
   })
 
   it('keeps archived channel history readable while removing the composer', async () => {
@@ -472,5 +540,122 @@ describe('Space experience', () => {
       .toBeInTheDocument()
     expect(await screen.findByText('Start the conversation')).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: 'Write a message' })).not.toBeInTheDocument()
+  })
+
+  it('searches member-only Space knowledge and links results to their source', async () => {
+    window.sessionStorage.setItem('authToken', 'test-token')
+    window.sessionStorage.setItem('username', 'space_member')
+    const channel = {
+      id: channelId,
+      name: 'general',
+      description: 'Shared Space conversation.',
+      archived: false,
+      created_by_username: 'space_owner',
+      create_date: '2026-11-17T00:00:00Z',
+      update_date: '2026-11-17T00:00:00Z'
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async input => {
+      const path = String(input)
+      if (path.endsWith(`/api/spaces/${spaceId}/`)) {
+        return jsonResponse(detailResponse('member', 'member'))
+      }
+      if (path.endsWith(`/api/spaces/${spaceId}/channels/`)) {
+        return jsonResponse([channel])
+      }
+      if (path.includes(`/api/spaces/${spaceId}/search/?`)) {
+        return jsonResponse({
+          count: 3,
+          page: 1,
+          page_size: 20,
+          total_pages: 1,
+          results: [
+            {
+              id: 'message-1',
+              type: 'discussion',
+              title: 'space_member',
+              excerpt: 'A useful Python discussion.',
+              created_at: '2026-11-17T12:00:00Z',
+              author: 'space_member',
+              channel,
+              source_domain: null,
+              source_message_id: 'message-1',
+              knowledge_id: null,
+              knowledge_preserved_at: null,
+              source_updated_at: '2026-11-17T12:00:00Z',
+              knowledge_version: null,
+              knowledge_corrected: false
+            },
+            {
+              id: resourceId,
+              type: 'resource',
+              title: 'Python guide',
+              excerpt: 'A practical Python reference.',
+              created_at: '2026-11-16T12:00:00Z',
+              author: 'space_member',
+              channel: null,
+              source_domain: 'example.com',
+              source_message_id: null,
+              knowledge_id: null,
+              knowledge_preserved_at: null,
+              source_updated_at: null,
+              knowledge_version: null,
+              knowledge_corrected: false
+            },
+            {
+              id: 'message-knowledge',
+              type: 'knowledge',
+              title: '#general',
+              excerpt: 'A preserved Python answer.',
+              created_at: '2026-11-15T12:00:00Z',
+              author: 'space_member',
+              channel,
+              source_domain: null,
+              source_message_id: 'message-knowledge',
+              knowledge_id: 7,
+              knowledge_preserved_at: '2026-11-15T12:00:00Z',
+              source_updated_at: '2026-11-16T12:00:00Z',
+              knowledge_version: 2,
+              knowledge_corrected: true
+            }
+          ]
+        })
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={[`/spaces/${spaceId}/search`]}>
+        <App />
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Search Python Learners' }))
+      .toBeInTheDocument()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search discussions and resources' }), {
+      target: { value: 'Python' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+    expect(await screen.findByRole('heading', { name: '3 results' })).toBeInTheDocument()
+    expect(screen.getAllByText('Python').length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: 'space_member' })).toHaveAttribute(
+      'href',
+      `/spaces/${spaceId}/channels/${channelId}#message-message-1`
+    )
+    expect(screen.getByRole('link', { name: 'Python guide' })).toHaveAttribute(
+      'href',
+      `/spaces/${spaceId}/resources/${resourceId}`
+    )
+    expect(screen.getByRole('link', { name: '#general' })).toHaveAttribute(
+      'href',
+      `/spaces/${spaceId}/channels/${channelId}#message-message-knowledge`
+    )
+    expect(screen.getByText(/KNOWLEDGE.*general.*CORRECTED/)).toBeInTheDocument()
+    const searchCall = fetchMock.mock.calls.find(call =>
+      String(call[0]).includes(`/api/spaces/${spaceId}/search/?`)
+    )
+    expect(String(searchCall?.[0])).toContain('q=Python')
+    expect(searchCall?.[1]?.headers).toEqual({ Authorization: 'Token test-token' })
   })
 })

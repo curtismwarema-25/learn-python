@@ -160,6 +160,302 @@ class ResourceReference(models.Model):
         ]
 
 
+class MessageReport(models.Model):
+    """A member report for one message in a Space channel."""
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        REVIEWED = 'reviewed', 'Reviewed'
+        DISMISSED = 'dismissed', 'Dismissed'
+        ACTIONED = 'actioned', 'Actioned'
+
+    space = models.ForeignKey(Space, related_name='message_reports', on_delete=models.PROTECT)
+    channel = models.ForeignKey('Channel', related_name='message_reports', on_delete=models.PROTECT)
+    message = models.ForeignKey('chat.ChatSessionMessage', related_name='reports', on_delete=models.PROTECT)
+    reported_by = models.ForeignKey(User, related_name='submitted_message_reports', on_delete=models.PROTECT)
+    reason = models.CharField(max_length=500)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    moderator_notes = models.CharField(max_length=500, blank=True)
+    reviewed_by = models.ForeignKey(
+        User, related_name='reviewed_message_reports', on_delete=models.PROTECT,
+        null=True, blank=True
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    create_date = models.DateTimeField(auto_now_add=True)
+    update_date = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=('message', 'reported_by'), name='uniq_message_reporter')
+        ]
+        ordering = ('status', '-create_date', '-id')
+
+
+class PreservedKnowledge(models.Model):
+    """A traceable, Space-scoped preservation of one channel message."""
+
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        NEEDS_REVIEW = 'needs_review', 'Needs review'
+        SOURCE_DELETED = 'source_deleted', 'Source deleted'
+        WITHDRAWN = 'withdrawn', 'Withdrawn'
+
+    space = models.ForeignKey(
+        Space,
+        related_name='preserved_knowledge',
+        on_delete=models.PROTECT
+    )
+    source_message = models.OneToOneField(
+        'chat.ChatSessionMessage',
+        related_name='preserved_knowledge',
+        on_delete=models.PROTECT
+    )
+    preserved_by = models.ForeignKey(
+        User,
+        related_name='preserved_knowledge',
+        on_delete=models.PROTECT
+    )
+    status = models.CharField(
+        max_length=14,
+        choices=Status.choices,
+        default=Status.ACTIVE
+    )
+    preserved_at = models.DateTimeField(auto_now_add=True)
+    withdrawn_at = models.DateTimeField(null=True, blank=True)
+    withdrawn_by = models.ForeignKey(
+        User,
+        related_name='withdrawn_knowledge',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True
+    )
+    current_version = models.ForeignKey(
+        'KnowledgeVersion',
+        related_name='current_knowledge',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status__in=('active', 'needs_review', 'source_deleted'),
+                        withdrawn_at__isnull=True
+                    )
+                    | models.Q(status='withdrawn', withdrawn_at__isnull=False)
+                ),
+                name='knowledge_withdrawal_fields_consistent'
+            )
+        ]
+
+
+class KnowledgeVersion(models.Model):
+    """Immutable snapshot of one preserved knowledge record."""
+
+    knowledge = models.ForeignKey(
+        PreservedKnowledge,
+        related_name='versions',
+        on_delete=models.PROTECT
+    )
+    source_message = models.ForeignKey(
+        'chat.ChatSessionMessage',
+        related_name='knowledge_versions',
+        on_delete=models.PROTECT
+    )
+    version_number = models.PositiveIntegerField()
+    content = models.TextField(max_length=2000)
+    explanation = models.CharField(max_length=500, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        related_name='created_knowledge_versions',
+        on_delete=models.PROTECT
+    )
+    create_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('knowledge', 'version_number'),
+                name='uniq_knowledge_version_number'
+            )
+        ]
+
+
+class KnowledgeIndexingJob(models.Model):
+    """Materialization state for one immutable knowledge version."""
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        INDEXED = 'indexed', 'Indexed'
+        FAILED = 'failed', 'Failed'
+        OBSOLETE = 'obsolete', 'Obsolete'
+
+    class EmbeddingStatus(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        PROCESSING = 'processing', 'Processing'
+        COMPLETE = 'complete', 'Complete'
+        FAILED = 'failed', 'Failed'
+        OBSOLETE = 'obsolete', 'Obsolete'
+
+    knowledge = models.ForeignKey(
+        PreservedKnowledge,
+        related_name='indexing_jobs',
+        on_delete=models.PROTECT
+    )
+    version = models.ForeignKey(
+        KnowledgeVersion,
+        related_name='indexing_jobs',
+        on_delete=models.PROTECT
+    )
+    space = models.ForeignKey(
+        Space,
+        related_name='knowledge_indexing_jobs',
+        on_delete=models.PROTECT
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.PENDING
+    )
+    attempt_count = models.PositiveIntegerField(default=0)
+    error_message = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    create_date = models.DateTimeField(auto_now_add=True)
+    update_date = models.DateTimeField(auto_now=True)
+    embedding_status = models.CharField(
+        max_length=10,
+        choices=EmbeddingStatus.choices,
+        default=EmbeddingStatus.PENDING
+    )
+    embedding_provider = models.CharField(max_length=80, blank=True)
+    embedding_model = models.CharField(max_length=120, blank=True)
+    embedding_attempt_count = models.PositiveIntegerField(default=0)
+    embedding_error = models.TextField(blank=True)
+    embedding_started_at = models.DateTimeField(null=True, blank=True)
+    embedding_completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('knowledge', 'version'),
+                name='uniq_knowledge_indexing_job_version'
+            )
+        ]
+        indexes = [
+            models.Index(fields=('space', 'status'), name='knowledge_job_space_status')
+        ]
+
+
+class KnowledgeIndexChunk(models.Model):
+    """Database-backed retrieval unit, ready for a future embedding field."""
+
+    job = models.ForeignKey(
+        KnowledgeIndexingJob,
+        related_name='chunks',
+        on_delete=models.PROTECT
+    )
+    space = models.ForeignKey(
+        Space,
+        related_name='knowledge_index_chunks',
+        on_delete=models.PROTECT
+    )
+    knowledge = models.ForeignKey(
+        PreservedKnowledge,
+        related_name='index_chunks',
+        on_delete=models.PROTECT
+    )
+    version = models.ForeignKey(
+        KnowledgeVersion,
+        related_name='index_chunks',
+        on_delete=models.PROTECT
+    )
+    source_message = models.ForeignKey(
+        'chat.ChatSessionMessage',
+        related_name='knowledge_index_chunks',
+        on_delete=models.PROTECT
+    )
+    chunk_index = models.PositiveIntegerField()
+    content = models.TextField(max_length=1200)
+    start_offset = models.PositiveIntegerField()
+    end_offset = models.PositiveIntegerField()
+    source_author = models.CharField(max_length=150)
+    source_channel_id = models.UUIDField()
+    source_message_created_at = models.DateTimeField()
+    create_date = models.DateTimeField(auto_now_add=True)
+    invalidated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('job', 'chunk_index'),
+                name='uniq_index_chunk_position'
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=('space', 'knowledge', 'version'),
+                name='knowledge_chunk_lookup'
+            )
+        ]
+
+
+class KnowledgeChunkEmbedding(models.Model):
+    """A replaceable vector materialization for one indexed chunk."""
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        READY = 'ready', 'Ready'
+        FAILED = 'failed', 'Failed'
+        OBSOLETE = 'obsolete', 'Obsolete'
+
+    chunk = models.ForeignKey(
+        KnowledgeIndexChunk,
+        related_name='embeddings',
+        on_delete=models.PROTECT
+    )
+    space = models.ForeignKey(
+        Space,
+        related_name='knowledge_chunk_embeddings',
+        on_delete=models.PROTECT
+    )
+    knowledge_version = models.ForeignKey(
+        KnowledgeVersion,
+        related_name='chunk_embeddings',
+        on_delete=models.PROTECT
+    )
+    provider = models.CharField(max_length=80)
+    model = models.CharField(max_length=120)
+    dimensions = models.PositiveIntegerField()
+    vector = models.JSONField(default=list)
+    status = models.CharField(
+        max_length=8,
+        choices=Status.choices,
+        default=Status.PENDING
+    )
+    error_message = models.TextField(blank=True)
+    generated_at = models.DateTimeField(null=True, blank=True)
+    create_date = models.DateTimeField(auto_now_add=True)
+    update_date = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('chunk', 'provider', 'model'),
+                name='uniq_chunk_embedding_provider_model'
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=('space', 'knowledge_version', 'status'),
+                name='embedding_space_version_status'
+            )
+        ]
+
+
 class SpaceMembership(models.Model):
     """An active non-owner member of a Space."""
 

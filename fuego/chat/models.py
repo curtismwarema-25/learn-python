@@ -72,6 +72,14 @@ class ChatSessionMessage(TrackableDateModel):
         ChatSession, related_name='messages', on_delete=models.PROTECT
     )
     message = models.TextField(max_length=2000)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        User,
+        related_name='deleted_chat_messages',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True
+    )
 
     def to_json(self):
         """deserialize message to JSON."""
@@ -80,6 +88,32 @@ class ChatSessionMessage(TrackableDateModel):
             'user': deserialize_user(self.user),
             'message': self.message
         }
+
+
+class ChatSessionMessageRevision(models.Model):
+    """Immutable prior content captured before a source message edit."""
+
+    message = models.ForeignKey(
+        ChatSessionMessage,
+        related_name='revisions',
+        on_delete=models.PROTECT
+    )
+    revision_number = models.PositiveIntegerField()
+    content = models.TextField(max_length=2000)
+    changed_by = models.ForeignKey(
+        User,
+        related_name='created_message_revisions',
+        on_delete=models.PROTECT
+    )
+    create_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('message', 'revision_number'),
+                name='uniq_message_revision_number'
+            )
+        ]
 
 
 class ChatSessionMember(TrackableDateModel):

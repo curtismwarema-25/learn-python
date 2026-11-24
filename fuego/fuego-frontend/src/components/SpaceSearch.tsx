@@ -42,13 +42,20 @@ function highlightText (text: string, query: string): ReactNode {
 }
 
 function searchResultPath (spaceId: string, result: SpaceSearchResult) {
-  if (result.type === 'discussion' && result.channel) {
-    return `/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(result.channel.id)}#message-${encodeURIComponent(result.id)}`
+  if ((result.type === 'discussion' || result.type === 'knowledge') && result.channel) {
+    const messageId = result.sourceMessageId ?? result.id
+    return `/spaces/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(result.channel.id)}#message-${encodeURIComponent(messageId)}`
   }
   return `/spaces/${encodeURIComponent(spaceId)}/resources/${encodeURIComponent(result.id)}`
 }
 
 function resultSourceLabel (result: SpaceSearchResult) {
+  if (result.type === 'knowledge') {
+    const archived = result.channel?.archived ? ' · ARCHIVED' : ''
+    const corrected = result.knowledgeCorrected ? ' · CORRECTED' : ''
+    const version = result.knowledgeVersion ? ` · V${result.knowledgeVersion}` : ''
+    return `KNOWLEDGE · #${result.channel?.name ?? ''}${version}${archived}${corrected}`
+  }
   if (result.type === 'discussion') {
     return result.channel?.archived
       ? `DISCUSSION · #${result.channel.name} · ARCHIVED`
@@ -90,6 +97,7 @@ export default function SpaceSearch () {
     }
 
     const id = spaceId
+    const authToken = token
     const controller = new AbortController()
     let active = true
     setContextLoading(true)
@@ -99,14 +107,14 @@ export default function SpaceSearch () {
       try {
         const detail = parseSpaceDetail(await apiRequest(
           `/api/spaces/${encodeURIComponent(id)}/`,
-          { headers: authHeaders(token), signal: controller.signal }
+          { headers: authHeaders(authToken), signal: controller.signal }
         ))
         if (!detail.role) {
           throw new Error('Search is available to active Space members only.')
         }
         const availableChannels = parseSpaceChannels(await apiRequest(
           `/api/spaces/${encodeURIComponent(id)}/channels/`,
-          { headers: authHeaders(token), signal: controller.signal }
+          { headers: authHeaders(authToken), signal: controller.signal }
         ))
         if (active) {
           setSpace(detail)
@@ -140,6 +148,8 @@ export default function SpaceSearch () {
       return undefined
     }
 
+    const id = spaceId
+    const authToken = token
     const controller = new AbortController()
     let active = true
     const params = new URLSearchParams({
@@ -159,8 +169,8 @@ export default function SpaceSearch () {
     async function search () {
       try {
         const response = parseSpaceSearchResponse(await apiRequest(
-          `/api/spaces/${encodeURIComponent(spaceId)}/search/?${params.toString()}`,
-          { headers: authHeaders(token), signal: controller.signal }
+          `/api/spaces/${encodeURIComponent(id)}/search/?${params.toString()}`,
+          { headers: authHeaders(authToken), signal: controller.signal }
         ))
         if (active) setSearchResults(response)
       } catch (error: unknown) {
@@ -298,6 +308,7 @@ export default function SpaceSearch () {
                       if (
                         value === 'all' ||
                         value === 'discussions' ||
+                        value === 'knowledge' ||
                         value === 'resources'
                       ) {
                         changeContentType(value)
@@ -307,6 +318,7 @@ export default function SpaceSearch () {
                   >
                     <option value="all">All</option>
                     <option value="discussions">Discussions</option>
+                    <option value="knowledge">Preserved knowledge</option>
                     <option value="resources">Resources</option>
                   </select>
                 </label>
@@ -352,7 +364,7 @@ export default function SpaceSearch () {
                 </label>
               </div>
               <p className="space-search-hint">
-                Channel filters narrow discussions; resource results remain included when searching all content.
+                Channel filters narrow discussions and preserved knowledge; resource results remain included when searching all content.
               </p>
             </form>
 
@@ -381,7 +393,7 @@ export default function SpaceSearch () {
                 {searchResults.count === 0
                   ? (
                     <p className="space-empty" role="status">
-                      No discussions or active resources match “{submittedQuery}”.
+                      No discussions, preserved knowledge, or active resources match “{submittedQuery}”.
                     </p>
                   )
                   : (

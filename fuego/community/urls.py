@@ -26,6 +26,36 @@ urlpatterns = [
         name='search'
     ),
     path(
+        'spaces/<uuid:space_id>/knowledge/',
+        views.SpaceKnowledgeView.as_view(),
+        name='knowledge'
+    ),
+    path(
+        'spaces/<uuid:space_id>/knowledge/<int:knowledge_id>/withdraw/',
+        views.SpaceKnowledgeDetailView.as_view(),
+        name='knowledge-withdraw'
+    ),
+    path(
+        'spaces/<uuid:space_id>/knowledge/<int:knowledge_id>/corrections/',
+        views.SpaceKnowledgeCorrectionView.as_view(),
+        name='knowledge-correction'
+    ),
+    path(
+        'spaces/<uuid:space_id>/knowledge/<int:knowledge_id>/history/',
+        views.SpaceKnowledgeHistoryView.as_view(),
+        name='knowledge-history'
+    ),
+    path(
+        'spaces/<uuid:space_id>/knowledge/<int:knowledge_id>/chunks/',
+        views.SpaceKnowledgeChunksView.as_view(),
+        name='knowledge-chunks'
+    ),
+    path(
+        'spaces/<uuid:space_id>/knowledge/<int:knowledge_id>/',
+        views.SpaceKnowledgeDetailView.as_view(),
+        name='knowledge-detail'
+    ),
+    path(
         'spaces/invites/join/',
         views.SpaceInviteJoinView.as_view(),
         name='invite-join'
@@ -39,6 +69,26 @@ urlpatterns = [
         'spaces/<uuid:space_id>/channels/<uuid:channel_id>/messages/',
         views.SpaceChannelMessagesView.as_view(),
         name='channel-messages'
+    ),
+    path(
+        'spaces/<uuid:space_id>/channels/<uuid:channel_id>/messages/<int:message_id>/revisions/',
+        views.SpaceChannelMessageRevisionsView.as_view(),
+        name='channel-message-revisions'
+    ),
+    path(
+        'spaces/<uuid:space_id>/channels/<uuid:channel_id>/messages/<int:message_id>/reports/',
+        views.SpaceChannelMessageReportView.as_view(),
+        name='channel-message-reports'
+    ),
+    path(
+        'spaces/<uuid:space_id>/channels/<uuid:channel_id>/messages/<int:message_id>/reports/<int:report_id>/',
+        views.SpaceChannelMessageReportView.as_view(),
+        name='channel-message-report-detail'
+    ),
+    path(
+        'spaces/<uuid:space_id>/channels/<uuid:channel_id>/messages/<int:message_id>/',
+        views.SpaceChannelMessageDetailView.as_view(),
+        name='channel-message-detail'
     ),
     path(
         'spaces/<uuid:space_id>/channels/<uuid:channel_id>/',

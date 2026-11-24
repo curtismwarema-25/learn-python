@@ -1,4 +1,4 @@
-"""Permission-scoped search over existing Space conversations and resources."""
+"""Permission-scoped search over live Space conversations and resources."""
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -8,12 +8,12 @@ import re
 from typing import Iterator
 from urllib.parse import urlsplit
 
-from django.db.models import Case, IntegerField, Q, Value, When
+from django.db.models import Case, DateTimeField, F, IntegerField, Q, Value, When
 from django.utils import timezone
 
 from chat.models import ChatSessionMessage
 
-from .models import Resource
+from .models import PreservedKnowledge, Resource
 
 
 ITERATOR_CHUNK_SIZE = 100
@@ -35,6 +35,12 @@ class SearchHit:
     channel_archived: bool | None
     source_domain: str | None
     relevance: int
+    source_message_id: str | None = None
+    knowledge_id: int | None = None
+    knowledge_preserved_at: datetime | None = None
+    source_updated_at: datetime | None = None
+    knowledge_version_number: int | None = None
+    knowledge_corrected: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,20 +68,20 @@ def _all_terms_match(fields: tuple[str, ...], terms: tuple[str, ...]) -> Q:
     return condition
 
 
-def _apply_date_range(queryset, start_date, end_date):
+def _apply_date_range(queryset, start_date, end_date, field='create_date'):
     current_timezone = timezone.get_current_timezone()
     if start_date is not None:
         lower_bound = timezone.make_aware(
             datetime.combine(start_date, time.min),
             current_timezone
         )
-        queryset = queryset.filter(create_date__gte=lower_bound)
+        queryset = queryset.filter(**{f'{field}__gte': lower_bound})
     if end_date is not None and end_date < date.max:
         upper_bound = timezone.make_aware(
             datetime.combine(end_date + timedelta(days=1), time.min),
             current_timezone
         )
-        queryset = queryset.filter(create_date__lt=upper_bound)
+        queryset = queryset.filter(**{f'{field}__lt': upper_bound})
     return queryset
 
 
@@ -118,7 +124,43 @@ def _message_hits(queryset, terms: tuple[str, ...]) -> Iterator[SearchHit]:
             channel_name=channel.name,
             channel_archived=channel.archived_at is not None,
             source_domain=None,
-            relevance=message.relevance
+            relevance=message.relevance,
+            source_message_id=str(message.pk),
+            knowledge_id=getattr(message, 'knowledge_id', None),
+            knowledge_preserved_at=getattr(message, 'knowledge_preserved_at', None),
+            source_updated_at=message.update_date,
+            knowledge_version_number=getattr(message, 'knowledge_version_number', None),
+            knowledge_corrected=(
+                getattr(message, 'knowledge_version_number', None) is not None
+                and message.knowledge_version_number > 1
+            )
+        )
+
+
+def _knowledge_hits(queryset, terms: tuple[str, ...]) -> Iterator[SearchHit]:
+    for knowledge in queryset.iterator(chunk_size=ITERATOR_CHUNK_SIZE):
+        message = knowledge.source_message
+        version = knowledge.current_version
+        channel = message.chat_session.space_channel
+        yield SearchHit(
+            content_type='knowledge',
+            source_id=str(message.pk),
+            sort_id=knowledge.pk,
+            title=f'#{channel.name}',
+            excerpt=_excerpt(version.content, terms),
+            created_at=message.create_date,
+            author=message.user.username,
+            channel_id=str(channel.pk),
+            channel_name=channel.name,
+            channel_archived=channel.archived_at is not None,
+            source_domain=None,
+            relevance=knowledge.relevance,
+            source_message_id=str(message.pk),
+            knowledge_id=knowledge.pk,
+            knowledge_preserved_at=knowledge.preserved_at,
+            source_updated_at=message.update_date,
+            knowledge_version_number=version.version_number,
+            knowledge_corrected=version.version_number > 1
         )
 
 
@@ -175,6 +217,7 @@ def search_space(
         message_queryset = (
             ChatSessionMessage.objects
             .filter(chat_session__space_channel__space_id=space.pk)
+            .filter(deleted_at__isnull=True)
             .filter(_all_terms_match(('message',), terms))
             .select_related('user', 'chat_session__space_channel')
             .annotate(
@@ -183,6 +226,30 @@ def search_space(
                     When(message__icontains=normalized_query, then=Value(400)),
                     default=Value(100),
                     output_field=IntegerField()
+                ),
+                knowledge_id=Case(
+                    When(
+                        preserved_knowledge__status=PreservedKnowledge.Status.ACTIVE,
+                        then=F('preserved_knowledge__id')
+                    ),
+                    default=Value(None),
+                    output_field=IntegerField(null=True)
+                ),
+                knowledge_preserved_at=Case(
+                    When(
+                        preserved_knowledge__status=PreservedKnowledge.Status.ACTIVE,
+                        then=F('preserved_knowledge__preserved_at')
+                    ),
+                    default=Value(None),
+                    output_field=DateTimeField(null=True)
+                ),
+                knowledge_version_number=Case(
+                    When(
+                        preserved_knowledge__status=PreservedKnowledge.Status.ACTIVE,
+                        then=F('preserved_knowledge__current_version__version_number')
+                    ),
+                    default=Value(None),
+                    output_field=IntegerField(null=True)
                 )
             )
         )
@@ -195,6 +262,58 @@ def search_space(
             start_date,
             end_date
         ).order_by('-relevance', '-create_date', 'pk')
+
+        if content_type == 'all':
+            message_queryset = message_queryset.filter(
+                Q(preserved_knowledge__isnull=True)
+                | ~Q(preserved_knowledge__status=PreservedKnowledge.Status.ACTIVE)
+            )
+
+    knowledge_queryset = ChatSessionMessage.objects.none()
+    if content_type in {'all', 'knowledge'}:
+        knowledge_queryset = (
+            PreservedKnowledge.objects
+            .filter(
+                space_id=space.pk,
+                status=PreservedKnowledge.Status.ACTIVE,
+                current_version__isnull=False,
+                source_message__deleted_at__isnull=True,
+                source_message__chat_session__space_channel__space_id=space.pk
+            )
+            .filter(_all_terms_match(('current_version__content',), terms))
+            .select_related(
+                'source_message__user',
+                'source_message__chat_session__space_channel',
+                'current_version'
+            )
+            .annotate(
+                relevance=Case(
+                    When(
+                        current_version__content__iexact=normalized_query,
+                        then=Value(700)
+                    ),
+                    When(
+                        current_version__content__icontains=normalized_query,
+                        then=Value(600)
+                    ),
+                    default=Value(200),
+                    output_field=IntegerField()
+                )
+            )
+        )
+        if channel is not None:
+            knowledge_queryset = knowledge_queryset.filter(
+                source_message__chat_session__space_channel=channel
+            )
+        knowledge_queryset = knowledge_queryset.filter(
+            source_message__chat_session__space_channel__space_id=space.pk
+        )
+        knowledge_queryset = _apply_date_range(
+            knowledge_queryset,
+            start_date,
+            end_date,
+            field='source_message__create_date'
+        ).order_by('-relevance', '-source_message__create_date', 'pk')
 
     resource_queryset = Resource.objects.none()
     if content_type in {'all', 'resources'}:
@@ -223,16 +342,21 @@ def search_space(
             end_date
         ).order_by('-relevance', '-create_date', 'pk')
 
-    count = message_queryset.count() + resource_queryset.count()
+    count = (
+        message_queryset.count()
+        + knowledge_queryset.count()
+        + resource_queryset.count()
+    )
     total_pages = (count + page_size - 1) // page_size
     offset = (page - 1) * page_size
     if offset >= count:
         results = []
     else:
         message_results = _message_hits(message_queryset, terms)
+        knowledge_results = _knowledge_hits(knowledge_queryset, terms)
         resource_results = _resource_hits(resource_queryset, terms)
         ordered_results = merge(
-            message_results,
+            merge(message_results, knowledge_results, key=_sort_key),
             resource_results,
             key=_sort_key
         )

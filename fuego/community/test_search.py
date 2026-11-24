@@ -7,7 +7,14 @@ from rest_framework.test import APIClient
 
 from chat.models import ChatSession, ChatSessionMessage
 
-from .models import Channel, Resource, Space, SpaceMembership
+from .models import (
+    Channel,
+    KnowledgeVersion,
+    PreservedKnowledge,
+    Resource,
+    Space,
+    SpaceMembership
+)
 from .permissions import MEMBER
 
 
@@ -213,6 +220,130 @@ class SpaceSearchAPITests(TestCase):
         self.assertEqual(foreign_filter.status_code, 404)
         self.assertEqual(incompatible_filter.status_code, 400)
 
+    def test_active_preserved_knowledge_is_searchable_without_duplicate_source(self):
+        message = self.create_message(
+            self.channel,
+            self.member,
+            'A preserved Python answer.'
+        )
+        knowledge = PreservedKnowledge.objects.create(
+            space=self.space,
+            source_message=message,
+            preserved_by=self.member
+        )
+        version = KnowledgeVersion.objects.create(
+            knowledge=knowledge,
+            source_message=message,
+            version_number=1,
+            content=message.message,
+            created_by=self.member
+        )
+        knowledge.current_version = version
+        knowledge.save(update_fields=('current_version',))
+        ordinary = self.create_message(
+            self.channel,
+            self.member,
+            'Another ordinary Python discussion.'
+        )
+
+        response = self.client.get(self.search_url, {'q': 'Python'})
+        knowledge_only = self.client.get(
+            self.search_url,
+            {'q': 'Python', 'content_type': 'knowledge'}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {result['type'] for result in response.data['results']},
+            {'knowledge', 'discussion'}
+        )
+        self.assertEqual(
+            len([result for result in response.data['results'] if result['id'] == str(message.pk)]),
+            1
+        )
+        result = next(result for result in response.data['results'] if result['type'] == 'knowledge')
+        self.assertEqual(result['id'], str(message.pk))
+        self.assertEqual(result['source_message_id'], str(message.pk))
+        self.assertEqual(result['knowledge_id'], knowledge.pk)
+        self.assertEqual(result['channel']['id'], str(self.channel.pk))
+        self.assertEqual(result['author'], self.member.username)
+        self.assertEqual(
+            next(result for result in response.data['results'] if result['id'] == str(ordinary.pk))['type'],
+            'discussion'
+        )
+        self.assertEqual(knowledge_only.data['count'], 1)
+        self.assertEqual(knowledge_only.data['results'][0]['type'], 'knowledge')
+
+    def test_withdrawn_knowledge_is_excluded_from_knowledge_search(self):
+        message = self.create_message(
+            self.channel,
+            self.member,
+            'Withdrawn Python answer.'
+        )
+        PreservedKnowledge.objects.create(
+            space=self.space,
+            source_message=message,
+            preserved_by=self.member,
+            status=PreservedKnowledge.Status.WITHDRAWN,
+            withdrawn_at=datetime(2026, 11, 23, tzinfo=datetime_timezone.utc),
+            withdrawn_by=self.member
+        )
+
+        response = self.client.get(
+            self.search_url,
+            {'q': 'Withdrawn Python', 'content_type': 'knowledge'}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 0)
+        self.assertEqual(response.data['results'], [])
+
+    def test_knowledge_search_uses_only_the_current_version_snapshot(self):
+        message = self.create_message(
+            self.channel,
+            self.member,
+            'Original answer wording.'
+        )
+        knowledge = PreservedKnowledge.objects.create(
+            space=self.space,
+            source_message=message,
+            preserved_by=self.member
+        )
+        original = KnowledgeVersion.objects.create(
+            knowledge=knowledge,
+            source_message=message,
+            version_number=1,
+            content='Original answer wording.',
+            created_by=self.member
+        )
+        current = KnowledgeVersion.objects.create(
+            knowledge=knowledge,
+            source_message=message,
+            version_number=2,
+            content='Corrected answer wording.',
+            explanation='Clarified the wording.',
+            created_by=self.member
+        )
+        knowledge.current_version = current
+        knowledge.save(update_fields=('current_version',))
+
+        old_search = self.client.get(self.search_url, {
+            'q': 'Original answer',
+            'content_type': 'knowledge'
+        })
+        current_search = self.client.get(self.search_url, {
+            'q': 'Corrected answer',
+            'content_type': 'knowledge'
+        })
+
+        self.assertEqual(old_search.data['count'], 0)
+        self.assertEqual(current_search.data['count'], 1)
+        result = current_search.data['results'][0]
+        self.assertEqual(result['knowledge_id'], knowledge.pk)
+        self.assertEqual(result['knowledge_version'], current.version_number)
+        self.assertTrue(result['knowledge_corrected'])
+        self.assertNotEqual(result['knowledge_version'], original.version_number)
+
     def test_ranking_is_relevance_first_then_recency_and_paginates(self):
         old = datetime(2020, 1, 1, tzinfo=datetime_timezone.utc)
         newer = datetime(2025, 1, 1, tzinfo=datetime_timezone.utc)
@@ -349,7 +480,7 @@ class SpaceSearchAPITests(TestCase):
         )
         self.create_resource(title='Bounded query inspection guide')
 
-        with self.assertNumQueries(6):
+        with self.assertNumQueries(8):
             response = self.client.get(
                 self.search_url,
                 {'q': 'bounded query inspection'}

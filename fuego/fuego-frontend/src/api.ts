@@ -5,6 +5,32 @@ export interface ChatMessage {
   user: { username: string }
   message: string
   resources?: SpaceResourceReference[]
+  knowledge?: SpaceKnowledgeReference
+}
+
+export interface SpaceKnowledgeReference {
+  id: number
+  status: SpaceKnowledgeStatus
+}
+
+export type SpaceKnowledgeStatus = 'active' | 'needs_review' | 'source_deleted' | 'withdrawn'
+
+export interface SpaceKnowledgeVersion {
+  id: number
+  versionNumber: number
+  content: string
+  explanation: string
+  sourceMessageId: number
+  createdByUsername: string
+  createDate: string
+  isCurrent: boolean
+}
+
+export interface SpaceKnowledgeHistory {
+  knowledgeId: number
+  status: SpaceKnowledgeStatus
+  currentVersion: number | null
+  versions: SpaceKnowledgeVersion[]
 }
 
 export type SpaceResourceStatus = 'active' | 'archived' | 'deleted'
@@ -43,11 +69,11 @@ export interface SpaceChannel {
   updateDate: string
 }
 
-export type SpaceSearchContentType = 'all' | 'discussions' | 'resources'
+export type SpaceSearchContentType = 'all' | 'discussions' | 'knowledge' | 'resources'
 
 export interface SpaceSearchResult {
   id: string
-  type: 'discussion' | 'resource'
+  type: 'discussion' | 'knowledge' | 'resource'
   title: string
   excerpt: string
   createdAt: string
@@ -58,6 +84,12 @@ export interface SpaceSearchResult {
     archived: boolean
   } | null
   sourceDomain: string | null
+  sourceMessageId: string | null
+  knowledgeId: number | null
+  knowledgePreservedAt: string | null
+  sourceUpdatedAt: string | null
+  knowledgeVersion: number | null
+  knowledgeCorrected: boolean
 }
 
 export interface SpaceSearchResponse {
@@ -66,6 +98,61 @@ export interface SpaceSearchResponse {
   pageSize: number
   totalPages: number
   results: SpaceSearchResult[]
+}
+
+export interface LearningActivity {
+  id: number
+  kind: 'short_response'
+  prompt: string
+}
+
+export interface LearningLesson {
+  id: number
+  title: string
+  objective: string
+  body: string
+  estimatedMinutes: number
+  position: number
+  activity: LearningActivity
+  completed: boolean
+  response: string | null
+  discussions: LearningDiscussion[]
+}
+
+export interface LearningDiscussion {
+  spaceId: string
+  spaceName: string
+  channelId: string
+  channelName: string
+  sourceMessageId: number | null
+}
+
+export interface LearningUnit {
+  id: number
+  title: string
+  description: string
+  position: number
+  lessons: LearningLesson[]
+}
+
+export interface LearningPathway {
+  slug: string
+  title: string
+  description: string
+  outcome: string
+  units: LearningUnit[]
+  enrolled: boolean
+  completedLessons: number
+  totalLessons: number
+  status: 'draft' | 'published' | 'archived'
+}
+
+export interface LearningCompletion {
+  lessonId: number
+  completed: boolean
+  response: string
+  completedLessons: number
+  totalLessons: number
 }
 
 export interface ChatInvite {
@@ -144,6 +231,103 @@ export function getErrorMessage (error: unknown): string {
   return error instanceof Error ? error.message : 'An unexpected error occurred.'
 }
 
+function parseLearningLesson (value: unknown): LearningLesson {
+  if (!isRecord(value) || !isInteger(value.id) || typeof value.title !== 'string' ||
+    typeof value.objective !== 'string' || typeof value.body !== 'string' ||
+    !isInteger(value.estimated_minutes) || !isInteger(value.position) ||
+    !isRecord(value.activity) || !isInteger(value.activity.id) ||
+    value.activity.kind !== 'short_response' || typeof value.activity.prompt !== 'string' ||
+    typeof value.completed !== 'boolean' ||
+    !(value.response === null || typeof value.response === 'string') ||
+    !Array.isArray(value.discussions)) {
+    throw new Error('The server returned an invalid learning lesson.')
+  }
+  const discussions = value.discussions.map(item => {
+    if (!isRecord(item) || typeof item.space_id !== 'string' || typeof item.space_name !== 'string' ||
+      typeof item.channel_id !== 'string' || typeof item.channel_name !== 'string' ||
+      !(item.source_message_id === null || isInteger(item.source_message_id))) {
+      throw new Error('The server returned an invalid learning discussion.')
+    }
+    return {
+      spaceId: item.space_id,
+      spaceName: item.space_name,
+      channelId: item.channel_id,
+      channelName: item.channel_name,
+      sourceMessageId: item.source_message_id
+    }
+  })
+  return {
+    id: value.id,
+    title: value.title,
+    objective: value.objective,
+    body: value.body,
+    estimatedMinutes: value.estimated_minutes,
+    position: value.position,
+    activity: {
+      id: value.activity.id,
+      kind: 'short_response',
+      prompt: value.activity.prompt
+    },
+    completed: value.completed,
+    response: value.response,
+    discussions
+  }
+}
+
+export function parseLearningPathway (value: unknown): LearningPathway {
+  if (!isRecord(value) || typeof value.slug !== 'string' || typeof value.title !== 'string' ||
+    typeof value.description !== 'string' || typeof value.outcome !== 'string' ||
+    !Array.isArray(value.units) || (value.status !== 'draft' && value.status !== 'published' && value.status !== 'archived') || typeof value.enrolled !== 'boolean' ||
+    !isInteger(value.completed_lessons) || !isInteger(value.total_lessons)) {
+    throw new Error('The server returned an invalid learning pathway.')
+  }
+  const units = value.units.map(unit => {
+    if (!isRecord(unit) || !isInteger(unit.id) || typeof unit.title !== 'string' ||
+      typeof unit.description !== 'string' || !isInteger(unit.position) ||
+      !Array.isArray(unit.lessons)) {
+      throw new Error('The server returned an invalid learning unit.')
+    }
+    return {
+      id: unit.id,
+      title: unit.title,
+      description: unit.description,
+      position: unit.position,
+      lessons: unit.lessons.map(parseLearningLesson)
+    }
+  })
+  return {
+    slug: value.slug,
+    title: value.title,
+    description: value.description,
+    outcome: value.outcome,
+    units,
+    enrolled: value.enrolled,
+    completedLessons: value.completed_lessons,
+    totalLessons: value.total_lessons,
+    status: value.status
+  }
+}
+
+export function parseLearningPathways (value: unknown): LearningPathway[] {
+  if (!Array.isArray(value)) throw new Error('The server returned invalid learning pathways.')
+  return value.map(parseLearningPathway)
+}
+
+export function parseLearningCompletion (value: unknown): LearningCompletion {
+  if (!isRecord(value) || !isInteger(value.lesson_id) || value.completed !== true ||
+    typeof value.response !== 'string' || !isInteger(value.completed_lessons) ||
+    !isInteger(value.total_lessons)) {
+    throw new Error('The server returned an invalid learning completion.')
+  }
+  return {
+    lessonId: value.lesson_id,
+    completed: true,
+    response: value.response,
+    completedLessons: value.completed_lessons,
+    totalLessons: value.total_lessons
+  }
+}
+
 export function parseAuthToken (value: unknown): string {
   if (!isRecord(value) || typeof value.auth_token !== 'string') {
     throw new Error('The server returned an invalid authentication token.')
@@ -196,11 +380,83 @@ export function parseChatMessage (value: unknown): ChatMessage {
     resources = value.resources.map(parseSpaceResourceReference)
   }
 
+  let knowledge: SpaceKnowledgeReference | undefined
+  if (value.knowledge !== undefined) {
+    if (
+      !isRecord(value.knowledge) ||
+      !isInteger(value.knowledge.id) ||
+      !isKnowledgeStatus(value.knowledge.status)
+    ) {
+      throw new Error('The server returned invalid preserved knowledge.')
+    }
+    knowledge = { id: value.knowledge.id, status: value.knowledge.status }
+  }
+
   return {
     id: value.id,
     user: { username: value.user.username },
     message: value.message,
-    resources
+    resources,
+    ...(knowledge ? { knowledge } : {})
+  }
+}
+
+export function parseSpaceKnowledgeReference (value: unknown): SpaceKnowledgeReference {
+  if (
+    !isRecord(value) ||
+    !isInteger(value.id) ||
+    !isKnowledgeStatus(value.status)
+  ) {
+    throw new Error('The server returned invalid preserved knowledge.')
+  }
+  return { id: value.id, status: value.status }
+}
+
+function isKnowledgeStatus (value: unknown): value is SpaceKnowledgeStatus {
+  return value === 'active' || value === 'needs_review' || value === 'source_deleted' || value === 'withdrawn'
+}
+
+export function parseSpaceKnowledgeHistory (value: unknown): SpaceKnowledgeHistory {
+  if (
+    !isRecord(value) ||
+    !isInteger(value.knowledge_id) ||
+    !isKnowledgeStatus(value.status) ||
+    !(value.current_version === null || isInteger(value.current_version)) ||
+    !Array.isArray(value.versions)
+  ) {
+    throw new Error('The server returned invalid knowledge history.')
+  }
+  return {
+    knowledgeId: value.knowledge_id,
+    status: value.status,
+    currentVersion: value.current_version,
+    versions: value.versions.map(parseSpaceKnowledgeVersion)
+  }
+}
+
+function parseSpaceKnowledgeVersion (value: unknown): SpaceKnowledgeVersion {
+  if (
+    !isRecord(value) ||
+    !isInteger(value.id) ||
+    !isInteger(value.version_number) ||
+    typeof value.content !== 'string' ||
+    typeof value.explanation !== 'string' ||
+    !isInteger(value.source_message_id) ||
+    typeof value.created_by_username !== 'string' ||
+    typeof value.create_date !== 'string' ||
+    typeof value.is_current !== 'boolean'
+  ) {
+    throw new Error('The server returned an invalid knowledge version.')
+  }
+  return {
+    id: value.id,
+    versionNumber: value.version_number,
+    content: value.content,
+    explanation: value.explanation,
+    sourceMessageId: value.source_message_id,
+    createdByUsername: value.created_by_username,
+    createDate: value.create_date,
+    isCurrent: value.is_current
   }
 }
 
@@ -352,13 +608,19 @@ function parseSpaceSearchResult (value: unknown): SpaceSearchResult {
   if (
     !isRecord(value) ||
     typeof value.id !== 'string' ||
-    (value.type !== 'discussion' && value.type !== 'resource') ||
+    (value.type !== 'discussion' && value.type !== 'knowledge' && value.type !== 'resource') ||
     typeof value.title !== 'string' ||
     typeof value.excerpt !== 'string' ||
     typeof value.created_at !== 'string' ||
     Number.isNaN(Date.parse(value.created_at)) ||
     !(value.author === null || typeof value.author === 'string') ||
-    !(value.source_domain === null || typeof value.source_domain === 'string')
+    !(value.source_domain === null || typeof value.source_domain === 'string') ||
+    !(value.source_message_id === null || typeof value.source_message_id === 'string') ||
+    !(value.knowledge_id === null || isInteger(value.knowledge_id)) ||
+    !(value.knowledge_preserved_at === null || typeof value.knowledge_preserved_at === 'string') ||
+    !(value.source_updated_at === null || typeof value.source_updated_at === 'string') ||
+    !(value.knowledge_version === null || isInteger(value.knowledge_version)) ||
+    typeof value.knowledge_corrected !== 'boolean'
   ) {
     throw new Error('The server returned an invalid Space search result.')
   }
@@ -381,8 +643,15 @@ function parseSpaceSearchResult (value: unknown): SpaceSearchResult {
   }
 
   if (
-    (value.type === 'discussion' && channel === null) ||
-    (value.type === 'resource' && channel !== null)
+    ((value.type === 'discussion' || value.type === 'knowledge') && channel === null) ||
+    (value.type === 'resource' && channel !== null) ||
+    (value.type === 'knowledge' && (
+      typeof value.source_message_id !== 'string' ||
+      !isInteger(value.knowledge_id) ||
+      typeof value.knowledge_preserved_at !== 'string' ||
+      typeof value.source_updated_at !== 'string' ||
+      !isInteger(value.knowledge_version)
+    ))
   ) {
     throw new Error('The server returned a mismatched search source.')
   }
@@ -395,7 +664,13 @@ function parseSpaceSearchResult (value: unknown): SpaceSearchResult {
     createdAt: value.created_at,
     author: value.author,
     channel,
-    sourceDomain: value.source_domain
+    sourceDomain: value.source_domain,
+    sourceMessageId: value.source_message_id,
+    knowledgeId: value.knowledge_id,
+    knowledgePreservedAt: value.knowledge_preserved_at,
+    sourceUpdatedAt: value.source_updated_at,
+    knowledgeVersion: value.knowledge_version,
+    knowledgeCorrected: value.knowledge_corrected
   }
 }
 

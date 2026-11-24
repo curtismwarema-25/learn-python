@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'djoser',
     'chat',
     'community',
+    'learning',
     'notifications',
 ]
 
@@ -60,6 +61,14 @@ CHANNEL_LAYERS = {
 }
 
 CELERY_TASK_ALWAYS_EAGER = True
+FUEGO_EMBEDDING_PROVIDER = os.environ.get('FUEGO_EMBEDDING_PROVIDER', 'fake')
+FUEGO_EMBEDDING_MODEL = os.environ.get('FUEGO_EMBEDDING_MODEL', 'fuego-fake-v1')
+FUEGO_EMBEDDING_DIMENSIONS = int(os.environ.get('FUEGO_EMBEDDING_DIMENSIONS', '32'))
+FUEGO_EMBEDDING_BATCH_SIZE = int(os.environ.get('FUEGO_EMBEDDING_BATCH_SIZE', '16'))
+FUEGO_EMBEDDING_EXTERNAL_ENABLED = os.environ.get(
+    'FUEGO_EMBEDDING_EXTERNAL_ENABLED', ''
+).lower() in {'1', 'true', 'yes'}
+FUEGO_EMBEDDING_API_KEY = os.environ.get('FUEGO_EMBEDDING_API_KEY', '')
 CHAT_RABBITMQ_ENABLED = os.environ.get(
     'CHAT_RABBITMQ_ENABLED', ''
 ).lower() in {'1', 'true', 'yes'}

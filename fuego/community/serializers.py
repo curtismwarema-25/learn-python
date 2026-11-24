@@ -6,8 +6,12 @@ from urllib.parse import urlsplit
 
 from rest_framework import serializers
 
+from chat.models import ChatSessionMessageRevision
+
 from .models import (
     Channel,
+    KnowledgeVersion,
+    PreservedKnowledge,
     Resource,
     Space,
     SpaceJoinRequest,
@@ -183,6 +187,118 @@ class ChannelSerializer(serializers.ModelSerializer):
 
     def get_archived(self, obj):
         return obj.archived_at is not None
+
+
+class PreservedKnowledgeCreateSerializer(serializers.Serializer):
+    message_id = serializers.IntegerField(min_value=1)
+
+
+class KnowledgeCorrectionSerializer(serializers.Serializer):
+    content = serializers.CharField(max_length=2000)
+    explanation = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+    def validate_content(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Corrected content is required.')
+        return value
+
+    def validate_explanation(self, value):
+        return value.strip()
+
+
+class KnowledgeVersionSerializer(serializers.ModelSerializer):
+    source_message_id = serializers.IntegerField(read_only=True)
+    created_by_username = serializers.CharField(
+        source='created_by.username',
+        read_only=True
+    )
+    is_current = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KnowledgeVersion
+        fields = (
+            'id',
+            'version_number',
+            'content',
+            'explanation',
+            'source_message_id',
+            'created_by_username',
+            'create_date',
+            'is_current'
+        )
+
+    def get_is_current(self, obj):
+        return obj.knowledge.current_version_id == obj.pk
+
+
+class PreservedKnowledgeSerializer(serializers.ModelSerializer):
+    source_message_id = serializers.IntegerField(read_only=True)
+    source_message = serializers.SerializerMethodField()
+    preserved_by_username = serializers.CharField(
+        source='preserved_by.username',
+        read_only=True
+    )
+    withdrawn_by_username = serializers.CharField(
+        source='withdrawn_by.username',
+        read_only=True,
+        allow_null=True
+    )
+    can_withdraw = serializers.SerializerMethodField()
+    can_correct = serializers.SerializerMethodField()
+    current_version = KnowledgeVersionSerializer(read_only=True, allow_null=True)
+    version_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PreservedKnowledge
+        fields = (
+            'id',
+            'status',
+            'source_message_id',
+            'source_message',
+            'preserved_by_username',
+            'preserved_at',
+            'withdrawn_at',
+            'withdrawn_by_username',
+            'can_withdraw',
+            'can_correct',
+            'current_version',
+            'version_count'
+        )
+
+    def get_source_message(self, obj):
+        message = obj.source_message
+        channel = message.chat_session.space_channel
+        return {
+            'content': message.message,
+            'author': message.user.username,
+            'created_at': message.create_date,
+            'channel_id': str(channel.id),
+            'channel_name': channel.name
+        }
+
+    def get_can_withdraw(self, obj):
+        role = self.context.get('space_role')
+        user = self.context['request'].user
+        return role in MANAGER_ROLES or obj.preserved_by_id == user.pk
+
+    def get_can_correct(self, obj):
+        role = self.context.get('space_role')
+        user = self.context['request'].user
+        return (
+            obj.status in (
+                PreservedKnowledge.Status.ACTIVE,
+                PreservedKnowledge.Status.NEEDS_REVIEW
+            )
+            and (
+                role in MANAGER_ROLES
+                or obj.preserved_by_id == user.pk
+                or obj.source_message.user_id == user.pk
+            )
+        )
+
+    def get_version_count(self, obj):
+        return getattr(obj, 'version_count', obj.versions.count())
 
 
 class ResourceLinkValidationMixin:
@@ -361,6 +477,32 @@ class ChannelMessageCreateSerializer(serializers.Serializer):
         return value
 
 
+class ChannelMessageUpdateSerializer(serializers.Serializer):
+    message = serializers.CharField(max_length=2000)
+
+    def validate_message(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('A non-empty message is required.')
+        return value
+
+
+class MessageRevisionSerializer(serializers.ModelSerializer):
+    changed_by_username = serializers.CharField(
+        source='changed_by.username',
+        read_only=True
+    )
+
+    class Meta:
+        model = ChatSessionMessageRevision
+        fields = (
+            'id',
+            'revision_number',
+            'content',
+            'changed_by_username',
+            'create_date'
+        )
+
 _SEARCH_TERM_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 
 
@@ -370,6 +512,7 @@ class SpaceSearchQuerySerializer(serializers.Serializer):
         choices=(
             ('all', 'All'),
             ('discussions', 'Discussions'),
+            ('knowledge', 'Preserved knowledge'),
             ('resources', 'Resources')
         ),
         default='all'
